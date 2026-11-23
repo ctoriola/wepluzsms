@@ -1,5 +1,5 @@
-// Normalise a phone number to E.164 (+234...). Mirrors public.normalize_phone (SQL)
-// and supabase/functions/_shared/phone.ts. Returns null if not a plausible number.
+// Normalise a phone number to E.164 (+234...). Mirrors normalizePhone in
+// server/core.ts. Returns null if not a plausible number.
 export function normalizePhone(input: string | null | undefined): string | null {
   if (!input) return null;
   const trimmed = input.trim();

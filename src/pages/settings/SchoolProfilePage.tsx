@@ -2,9 +2,11 @@ import { ImagePlus } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useAuth } from "@/auth/AuthProvider";
 import { Alert, Button, Field, FullPageSpinner, PageHeader, SchoolLogo } from "@/components/ui";
-import { resizeImageToWebp } from "@/lib/image";
+import { doc, getDoc } from "firebase/firestore";
+import { api, friendlyError } from "@/lib/api";
+import { db } from "@/lib/firebase";
+import { resizeImageToDataUrl } from "@/lib/image";
 import { normalizePhone, formatPhone } from "@/lib/phone";
-import { friendlyError, publicAssetUrl, SCHOOL_ASSETS_BUCKET, supabase } from "@/lib/supabase";
 
 const NIGERIAN_STATES = [
   "Abia", "Adamawa", "Akwa Ibom", "Anambra", "Bauchi", "Bayelsa", "Benue", "Borno", "Cross River", "Delta",
@@ -29,10 +31,9 @@ type Form = {
 const EMPTY: Form = { name: "", motto: "", address: "", city: "", state: "", phone: "", email: "", website: "", primary_color: "#14213D", accent_color: "#0F766E" };
 
 export function SchoolProfilePage() {
-  const { activeSchool, refresh } = useAuth();
+  const { activeSchool } = useAuth();
   const schoolId = activeSchool!.id;
   const [form, setForm] = useState<Form>(EMPTY);
-  const [logoPath, setLogoPath] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -43,17 +44,12 @@ export function SchoolProfilePage() {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const [school, settings] = await Promise.all([
-        supabase.from("schools").select("name").eq("id", schoolId).single(),
-        supabase.from("school_settings").select("*").eq("school_id", schoolId).single(),
-      ]);
-      if (cancelled) return;
-      if (school.error || settings.error) {
-        setMessage({ tone: "error", text: friendlyError(school.error ?? settings.error) });
-      } else {
-        const s = settings.data;
+      try {
+        const school = (await getDoc(doc(db, "schools", schoolId))).data();
+        if (cancelled || !school) return;
+        const s = school.settings ?? {};
         setForm({
-          name: school.data.name,
+          name: school.name,
           motto: s.motto ?? "",
           address: s.address ?? "",
           city: s.city ?? "",
@@ -61,12 +57,14 @@ export function SchoolProfilePage() {
           phone: formatPhone(s.phone),
           email: s.email ?? "",
           website: s.website ?? "",
-          primary_color: s.primary_color,
-          accent_color: s.accent_color,
+          primary_color: s.primaryColor ?? "#14213D",
+          accent_color: s.accentColor ?? "#0F766E",
         });
-        setLogoPath(s.logo_path);
+      } catch (err) {
+        if (!cancelled) setMessage({ tone: "error", text: friendlyError(err) });
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      setLoading(false);
     })();
     return () => {
       cancelled = true;
@@ -83,29 +81,27 @@ export function SchoolProfilePage() {
     if (form.name.trim().length < 2) return setMessage({ tone: "error", text: "Enter the school name." });
 
     setSaving(true);
-    const nameRes = await supabase.from("schools").update({ name: form.name.trim() }).eq("id", schoolId);
-    const settingsRes = await supabase
-      .from("school_settings")
-      .update({
-        motto: form.motto.trim() || null,
-        address: form.address.trim() || null,
-        city: form.city.trim() || null,
-        state: form.state || null,
-        phone,
-        email: form.email.trim().toLowerCase() || null,
-        website: form.website.trim() || null,
-        primary_color: form.primary_color,
-        accent_color: form.accent_color,
-      })
-      .eq("school_id", schoolId);
-    setSaving(false);
-
-    const error = nameRes.error ?? settingsRes.error;
-    if (error) {
-      setMessage({ tone: "error", text: friendlyError(error) });
-    } else {
+    try {
+      await api("schools.update", {
+        schoolId,
+        name: form.name.trim(),
+        settings: {
+          motto: form.motto.trim() || null,
+          address: form.address.trim() || null,
+          city: form.city.trim() || null,
+          state: form.state || null,
+          phone,
+          email: form.email.trim().toLowerCase() || null,
+          website: form.website.trim() || null,
+          primaryColor: form.primary_color,
+          accentColor: form.accent_color,
+        },
+      });
       setMessage({ tone: "success", text: "School profile saved." });
-      await refresh();
+    } catch (err) {
+      setMessage({ tone: "error", text: friendlyError(err) });
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -113,16 +109,9 @@ export function SchoolProfilePage() {
     setMessage(null);
     setUploading(true);
     try {
-      const blob = await resizeImageToWebp(file, 512);
-      const path = `${schoolId}/logo-${Date.now()}.webp`;
-      const { error: upErr } = await supabase.storage.from(SCHOOL_ASSETS_BUCKET).upload(path, blob, { contentType: "image/webp", cacheControl: "31536000" });
-      if (upErr) throw upErr;
-      const { error: dbErr } = await supabase.from("school_settings").update({ logo_path: path }).eq("school_id", schoolId);
-      if (dbErr) throw dbErr;
-      if (logoPath) await supabase.storage.from(SCHOOL_ASSETS_BUCKET).remove([logoPath]); // best effort
-      setLogoPath(path);
+      const dataUrl = await resizeImageToDataUrl(file);
+      await api("schools.setLogo", { schoolId, dataUrl });
       setMessage({ tone: "success", text: "Logo updated." });
-      await refresh();
     } catch (err) {
       setMessage({ tone: "error", text: friendlyError(err) });
     } finally {
@@ -143,14 +132,14 @@ export function SchoolProfilePage() {
       )}
 
       <section className="card mb-6 flex flex-col items-start gap-4 p-5 sm:flex-row sm:items-center">
-        <SchoolLogo url={publicAssetUrl(logoPath)} name={form.name || "School"} size={80} />
+        <SchoolLogo url={activeSchool?.logo ?? null} name={form.name || "School"} size={80} />
         <div className="flex-1">
           <h2 className="font-semibold">School logo</h2>
           <p className="mt-1 text-sm text-slate-500">PNG, JPG or WebP. A square image works best. We resize it automatically.</p>
         </div>
         <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => e.target.files?.[0] && void uploadLogo(e.target.files[0])} />
         <Button variant="secondary" loading={uploading} onClick={() => fileInput.current?.click()}>
-          <ImagePlus className="h-4 w-4" aria-hidden /> {logoPath ? "Change logo" : "Upload logo"}
+          <ImagePlus className="h-4 w-4" aria-hidden /> {activeSchool?.logo ? "Change logo" : "Upload logo"}
         </Button>
       </section>
 

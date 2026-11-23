@@ -1,5 +1,5 @@
 import { BrowserRouter, Link, Route, Routes } from "react-router-dom";
-import { AuthProvider } from "@/auth/AuthProvider";
+import { AuthProvider, useAuth } from "@/auth/AuthProvider";
 import { RequireAuth, RequireRole } from "@/auth/guards";
 import { AppShell } from "@/layout/AppShell";
 import { ADMIN_ROLES } from "@/lib/roles";
@@ -9,9 +9,16 @@ import { SubjectsPage } from "@/pages/academics/SubjectsPage";
 import { TeacherAssignmentsPage } from "@/pages/academics/TeacherAssignmentsPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { LoginPage } from "@/pages/LoginPage";
-import { ForgotPasswordPage, SetPasswordPage } from "@/pages/PasswordPages";
+import { ForgotPasswordPage } from "@/pages/PasswordPages";
+import { PlatformSchoolsPage } from "@/pages/platform/PlatformSchoolsPage";
+import { SetupPage } from "@/pages/SetupPage";
 import { SchoolProfilePage } from "@/pages/settings/SchoolProfilePage";
 import { StaffPage } from "@/pages/settings/StaffPage";
+
+function PlatformOnly({ children }: { children: React.ReactNode }) {
+  const { isPlatformAdmin } = useAuth();
+  return isPlatformAdmin ? <>{children}</> : <NotFound />;
+}
 
 function NotFound() {
   return (
@@ -31,7 +38,7 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/set-password" element={<SetPasswordPage />} />
+          <Route path="/setup" element={<SetupPage />} />
           <Route
             element={
               <RequireAuth>
@@ -40,6 +47,7 @@ export default function App() {
             }
           >
             <Route index element={<DashboardPage />} />
+            <Route path="platform/schools" element={<PlatformOnly><PlatformSchoolsPage /></PlatformOnly>} />
             <Route path="academics/calendar" element={<RequireRole roles={ADMIN_ROLES}><CalendarPage /></RequireRole>} />
             <Route path="academics/classes" element={<RequireRole roles={ADMIN_ROLES}><ClassesPage /></RequireRole>} />
             <Route path="academics/subjects" element={<RequireRole roles={ADMIN_ROLES}><SubjectsPage /></RequireRole>} />

@@ -3,9 +3,11 @@ import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useAuth, type CurrentTerm } from "@/auth/AuthProvider";
 import { Badge, PageHeader } from "@/components/ui";
-import { daysBetween, formatDate, must, todayIso, useAsync } from "@/lib/data";
+import { collection, doc, getCountFromServer, getDoc, getDocs, query, where } from "firebase/firestore";
+import { loadAssignments, loadLevels, loadSubjects } from "@/lib/academics";
+import { daysBetween, formatDate, todayIso, useAsync } from "@/lib/data";
+import { db } from "@/lib/firebase";
 import { ADMIN_ROLES } from "@/lib/roles";
-import { supabase } from "@/lib/supabase";
 
 function greeting() {
   const h = new Date().getHours();
@@ -40,32 +42,30 @@ function TermCard({ term }: { term: CurrentTerm | null }) {
 }
 
 function SetupChecklist({ schoolId, sessionId }: { schoolId: string; sessionId: string | null }) {
+  const { activeSchool } = useAuth();
   const { data } = useAsync(async () => {
-    const count = async (table: string) => {
-      const { count } = await supabase.from(table).select("id", { count: "exact", head: true }).eq("school_id", schoolId);
-      return count ?? 0;
-    };
-    const [settings, members, arms, offerings, assignments] = await Promise.all([
-      supabase.from("school_settings").select("address, phone, email, logo_path").eq("school_id", schoolId).maybeSingle(),
-      supabase.from("school_memberships").select("role").eq("school_id", schoolId).eq("status", "active"),
-      count("class_arms"),
-      count("class_subjects"),
-      sessionId
-        ? supabase.from("teacher_assignments").select("id", { count: "exact", head: true }).eq("school_id", schoolId).eq("session_id", sessionId).then((r) => r.count ?? 0)
-        : Promise.resolve(0),
+    const count = async (name: string, ...filters: ReturnType<typeof where>[]) =>
+      (await getCountFromServer(query(collection(db, "schools", schoolId, name), ...filters))).data().count;
+    const [school, members, levels, arms, assignments] = await Promise.all([
+      getDoc(doc(db, "schools", schoolId)),
+      getDocs(collection(db, "schools", schoolId, "members")),
+      getDocs(collection(db, "schools", schoolId, "classLevels")),
+      count("classArms"),
+      sessionId ? count("assignments", where("sessionId", "==", sessionId)) : Promise.resolve(0),
     ]);
-    const s = settings.data;
-    const roles = (members.data ?? []).map((m) => m.role as string);
+    const s = school.data()?.settings ?? {};
+    const roles = members.docs.flatMap((m) => (m.data().roles ?? []) as string[]);
+    const offerings = levels.docs.some((l) => Object.keys(l.data().subjects ?? {}).length > 0);
     return [
-      { done: Boolean(s?.address && s?.phone && s?.email), label: "Add the school's address, phone and email", to: "/settings/school" },
-      { done: Boolean(s?.logo_path), label: "Upload the school logo", to: "/settings/school" },
+      { done: Boolean(s.address && s.phone && s.email), label: "Add the school's address, phone and email", to: "/settings/school" },
+      { done: Boolean(s.hasLogo), label: "Upload the school logo", to: "/settings/school" },
       { done: roles.some((r) => r === "teacher" || r === "bursar"), label: "Invite your bursar and teachers", to: "/settings/staff" },
       { done: Boolean(sessionId), label: "Set up the session and current term", to: "/academics/calendar" },
       { done: arms > 0, label: "Create classes and arms", to: "/academics/classes" },
-      { done: offerings > 0, label: "Choose the subjects each class offers", to: "/academics/subjects" },
+      { done: offerings, label: "Choose the subjects each class offers", to: "/academics/subjects" },
       { done: assignments > 0, label: "Assign subject teachers", to: "/academics/teachers" },
     ];
-  }, [schoolId, sessionId]);
+  }, [schoolId, sessionId, activeSchool?.logo]);
 
   if (!data) return null;
   const doneCount = data.filter((i) => i.done).length;
@@ -93,32 +93,25 @@ function SetupChecklist({ schoolId, sessionId }: { schoolId: string; sessionId: 
   );
 }
 
-type MyClassRow = { subject_id: string; class_arm_id: string; subjects: { name: string } | null; class_arms: { name: string; class_levels: { name: string; order_index: number } | null } | null };
-
 function MyClasses({ schoolId, sessionId, userId }: { schoolId: string; sessionId: string; userId: string }) {
   const { data } = useAsync(async () => {
-    const [assigned, tutored] = await Promise.all([
-      supabase
-        .from("teacher_assignments")
-        .select("subject_id, class_arm_id, subjects(name), class_arms(name, class_levels(name, order_index))")
-        .eq("school_id", schoolId)
-        .eq("session_id", sessionId)
-        .eq("teacher_id", userId),
-      supabase.from("class_arms").select("id, name, class_levels(name)").eq("school_id", schoolId).eq("form_tutor_id", userId),
-    ]);
+    const [assigned, levels, subjects] = await Promise.all([loadAssignments(schoolId, sessionId, userId), loadLevels(schoolId), loadSubjects(schoolId)]);
+    const arms = levels.flatMap((l) => l.class_arms.map((a) => ({ ...a, level: l })));
+    const armById = new Map(arms.map((a) => [a.id, a]));
+    const subjectName = new Map(subjects.map((s) => [s.id, s.name]));
     return {
-      assigned: must(assigned) as unknown as MyClassRow[],
-      tutored: (must(tutored) as unknown as { id: string; name: string; class_levels: { name: string } | null }[]).map((a) => `${a.class_levels?.name ?? ""} ${a.name}`),
+      assigned: assigned.map((a) => ({ arm: armById.get(a.class_arm_id), subject: subjectName.get(a.subject_id) ?? "" })).filter((a) => a.arm),
+      tutored: arms.filter((a) => a.form_tutor_id === userId).map((a) => `${a.level.name} ${a.name}`),
     };
   }, [schoolId, sessionId, userId]);
 
   const grouped = useMemo(() => {
     const m = new Map<string, { label: string; order: number; subjects: string[] }>();
     for (const r of data?.assigned ?? []) {
-      const label = `${r.class_arms?.class_levels?.name ?? ""} ${r.class_arms?.name ?? ""}`;
-      const g = m.get(r.class_arm_id) ?? { label, order: r.class_arms?.class_levels?.order_index ?? 0, subjects: [] };
-      g.subjects.push(r.subjects?.name ?? "");
-      m.set(r.class_arm_id, g);
+      const arm = r.arm!;
+      const g = m.get(arm.id) ?? { label: `${arm.level.name} ${arm.name}`, order: arm.level.order_index, subjects: [] };
+      g.subjects.push(r.subject);
+      m.set(arm.id, g);
     }
     return [...m.values()].sort((a, b) => a.order - b.order || a.label.localeCompare(b.label));
   }, [data]);

@@ -1,11 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { friendlyError } from "./supabase";
-
-/** Unwrap a Supabase response: return data or throw the error. */
-export function must<T>(res: { data: T | null; error: unknown }): T {
-  if (res.error) throw res.error;
-  return res.data as T;
-}
+import { friendlyError } from "./api";
 
 /** Load data on mount (and whenever deps change), with loading/error state and reload(). */
 export function useAsync<T>(fn: () => Promise<T>, deps: unknown[]) {

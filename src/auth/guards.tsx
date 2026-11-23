@@ -6,7 +6,7 @@ import { useAuth } from "./AuthProvider";
 
 // Signed-in users with at least one school only.
 export function RequireAuth({ children }: { children: ReactNode }) {
-  const { loading, loadError, session, activeSchool, refresh, signOut } = useAuth();
+  const { loading, loadError, session, activeSchool, isPlatformAdmin, refresh, signOut } = useAuth();
   const location = useLocation();
 
   if (loading) return <FullPageSpinner />;
@@ -18,6 +18,11 @@ export function RequireAuth({ children }: { children: ReactNode }) {
         <Button className="mt-4" onClick={() => void refresh()}>Try again</Button>
       </div>
     );
+  }
+  if (!activeSchool && isPlatformAdmin) {
+    // A fresh platform with no schools yet: go and create one.
+    if (location.pathname !== "/platform/schools") return <Navigate to="/platform/schools" replace />;
+    return <>{children}</>;
   }
   if (!activeSchool) {
     return (

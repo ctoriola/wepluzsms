@@ -1,5 +1,5 @@
-import { must } from "./data";
-import { supabase } from "./supabase";
+import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+import { db } from "./firebase";
 
 export type Section = "nursery" | "primary" | "junior_secondary" | "senior_secondary";
 export const SECTIONS: Section[] = ["nursery", "primary", "junior_secondary", "senior_secondary"];
@@ -44,50 +44,101 @@ export type ClassSubject = { id: string; class_level_id: string; subject_id: str
 export type StaffOption = { id: string; name: string };
 export type TeacherAssignment = { id: string; session_id: string; class_arm_id: string; subject_id: string; teacher_id: string };
 
+const sdoc = (sid: string) => doc(db, "schools", sid);
+const scol = (sid: string, name: string) => collection(db, "schools", sid, name);
+
+async function currentIds(schoolId: string) {
+  const d = (await getDoc(sdoc(schoolId))).data();
+  return { termId: (d?.currentTermId as string | null) ?? null, sessionId: (d?.currentSessionId as string | null) ?? null };
+}
+
 export async function loadSessions(schoolId: string): Promise<AcademicSession[]> {
-  const rows = must(
-    await supabase
-      .from("academic_sessions")
-      .select("id, name, start_date, end_date, is_current, terms(id, session_id, term_number, name, start_date, end_date, next_term_begins, is_current)")
-      .eq("school_id", schoolId)
-      .order("start_date", { ascending: false }),
-  ) as AcademicSession[];
-  return rows.map((s) => ({ ...s, terms: [...(s.terms ?? [])].sort((a, b) => a.term_number - b.term_number) }));
+  const [sessions, terms, cur] = await Promise.all([getDocs(scol(schoolId, "sessions")), getDocs(scol(schoolId, "terms")), currentIds(schoolId)]);
+  const allTerms: Term[] = terms.docs.map((t) => {
+    const d = t.data();
+    return {
+      id: t.id,
+      session_id: d.sessionId,
+      term_number: d.termNumber,
+      name: d.name,
+      start_date: d.startDate,
+      end_date: d.endDate,
+      next_term_begins: d.nextTermBegins ?? null,
+      is_current: t.id === cur.termId,
+    };
+  });
+  return sessions.docs
+    .map((s) => {
+      const d = s.data();
+      return {
+        id: s.id,
+        name: d.name,
+        start_date: d.startDate,
+        end_date: d.endDate,
+        is_current: s.id === cur.sessionId,
+        terms: allTerms.filter((t) => t.session_id === s.id).sort((a, b) => a.term_number - b.term_number),
+      };
+    })
+    .sort((a, b) => b.start_date.localeCompare(a.start_date));
 }
 
 export async function loadLevels(schoolId: string): Promise<ClassLevel[]> {
-  const rows = must(
-    await supabase
-      .from("class_levels")
-      .select("id, name, section, order_index, class_arms(id, class_level_id, name, form_tutor_id, capacity)")
-      .eq("school_id", schoolId)
-      .order("order_index")
-      .order("name"),
-  ) as ClassLevel[];
-  return rows.map((l) => ({ ...l, class_arms: [...(l.class_arms ?? [])].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })) }));
+  const [levels, arms] = await Promise.all([getDocs(scol(schoolId, "classLevels")), getDocs(scol(schoolId, "classArms"))]);
+  const allArms: ClassArm[] = arms.docs.map((a) => {
+    const d = a.data();
+    return { id: a.id, class_level_id: d.levelId, name: d.name, form_tutor_id: d.formTutorId ?? null, capacity: d.capacity ?? null };
+  });
+  return levels.docs
+    .map((l) => {
+      const d = l.data();
+      return {
+        id: l.id,
+        name: d.name as string,
+        section: d.section as Section,
+        order_index: d.order as number,
+        class_arms: allArms.filter((a) => a.class_level_id === l.id).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })),
+      };
+    })
+    .sort((a, b) => a.order_index - b.order_index || a.name.localeCompare(b.name));
 }
 
 export async function loadSubjects(schoolId: string): Promise<Subject[]> {
-  return must(await supabase.from("subjects").select("id, name, short_code, category").eq("school_id", schoolId).order("name")) as Subject[];
+  const snap = await getDocs(scol(schoolId, "subjects"));
+  return snap.docs
+    .map((s) => ({ id: s.id, name: s.data().name, short_code: s.data().shortCode, category: s.data().category }) as Subject)
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/** Subjects offered per class level (stored as a map on each level). */
 export async function loadClassSubjects(schoolId: string): Promise<ClassSubject[]> {
-  return must(await supabase.from("class_subjects").select("id, class_level_id, subject_id, is_compulsory").eq("school_id", schoolId)) as ClassSubject[];
+  const snap = await getDocs(scol(schoolId, "classLevels"));
+  return snap.docs.flatMap((l) =>
+    Object.entries((l.data().subjects ?? {}) as Record<string, string>).map(([subjectId, state]) => ({
+      id: `${l.id}:${subjectId}`,
+      class_level_id: l.id,
+      subject_id: subjectId,
+      is_compulsory: state === "compulsory",
+    })),
+  );
 }
 
-/** Active teachers and school leaders (people who can teach or be form tutors). */
+/** Active teachers and school leaders (people who can teach or be form tutors). Admin-only read. */
 export async function loadTeachingStaff(schoolId: string): Promise<StaffOption[]> {
-  const rows = must(
-    await supabase
-      .from("school_memberships")
-      .select("user_id, role, profiles!school_memberships_user_id_fkey(full_name, email)")
-      .eq("school_id", schoolId)
-      .eq("status", "active")
-      .in("role", ["teacher", "principal", "school_admin", "proprietor"]),
-  ) as unknown as { user_id: string; profiles: { full_name: string | null; email: string | null } | null }[];
-  const byId = new Map<string, StaffOption>();
-  for (const r of rows) byId.set(r.user_id, { id: r.user_id, name: r.profiles?.full_name || r.profiles?.email || "Unnamed" });
-  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const snap = await getDocs(scol(schoolId, "members"));
+  return snap.docs
+    .map((m) => m.data())
+    .filter((m) => m.status === "active" && (m.roles as string[]).some((r) => ["teacher", "principal", "school_admin", "proprietor"].includes(r)))
+    .map((m) => ({ id: m.uid as string, name: (m.fullName || m.email || "Unnamed") as string }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function loadAssignments(schoolId: string, sessionId: string, teacherId?: string): Promise<TeacherAssignment[]> {
+  const filters = [where("sessionId", "==", sessionId), ...(teacherId ? [where("teacherId", "==", teacherId)] : [])];
+  const snap = await getDocs(query(scol(schoolId, "assignments"), ...filters));
+  return snap.docs.map((a) => {
+    const d = a.data();
+    return { id: a.id, session_id: d.sessionId, class_arm_id: d.armId, subject_id: d.subjectId, teacher_id: d.teacherId };
+  });
 }
 
 export function levelArmLabel(level: Pick<ClassLevel, "name">, arm: Pick<ClassArm, "name">) {

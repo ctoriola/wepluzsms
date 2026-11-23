@@ -4,6 +4,7 @@ import {
   CalendarCheck,
   CalendarDays,
   ClipboardList,
+  Globe,
   Layers,
   GraduationCap,
   HeartHandshake,
@@ -24,6 +25,10 @@ export type NavItem = {
   roles: Role[];
   /** Workstream that builds this page. Items without one are live now. */
   comingIn?: string;
+  /** Only MANDEXA platform admins see this item. */
+  platformOnly?: boolean;
+  /** Needs a school to be open. */
+  needsSchool?: boolean;
 };
 
 export type NavSection = { title?: string; items: NavItem[] };
@@ -31,7 +36,8 @@ export type NavSection = { title?: string; items: NavItem[] };
 const TEACHING: Role[] = [...ADMIN_ROLES, "teacher"];
 
 export const NAV: NavSection[] = [
-  { items: [{ label: "Dashboard", to: "/", icon: LayoutDashboard, roles: [...ROLES] }] },
+  { title: "Platform", items: [{ label: "Schools", to: "/platform/schools", icon: Globe, roles: [], platformOnly: true }] },
+  { items: [{ label: "Dashboard", to: "/", icon: LayoutDashboard, roles: [...ROLES], needsSchool: true }] },
   {
     title: "Academics",
     items: [
@@ -73,6 +79,9 @@ export const NAV: NavSection[] = [
   },
 ];
 
-export function navFor(can: (roles: Role[]) => boolean): NavSection[] {
-  return NAV.map((section) => ({ ...section, items: section.items.filter((i) => can(i.roles)) })).filter((s) => s.items.length > 0);
+export function navFor(can: (roles: Role[]) => boolean, isPlatformAdmin: boolean, hasSchool: boolean): NavSection[] {
+  return NAV.map((section) => ({
+    ...section,
+    items: section.items.filter((i) => (i.platformOnly ? isPlatformAdmin : hasSchool && can(i.roles))),
+  })).filter((s) => s.items.length > 0);
 }

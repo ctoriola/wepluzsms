@@ -1,10 +1,11 @@
-import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { useAuth } from "@/auth/AuthProvider";
-import { Alert, Button, Field, FullPageSpinner } from "@/components/ui";
-import { friendlyError, supabase } from "@/lib/supabase";
+import { sendPasswordResetEmail } from "firebase/auth";
+import { useState, type FormEvent, type ReactNode } from "react";
+import { Link } from "react-router-dom";
+import { Alert, Button, Field } from "@/components/ui";
+import { friendlyError } from "@/lib/api";
+import { auth } from "@/lib/firebase";
 
-function AuthCard({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
+function AuthCard({ title, description, children }: { title: string; description: string; children: ReactNode }) {
   return (
     <div className="flex min-h-full items-center justify-center bg-slate-50 px-4 py-10">
       <div className="card w-full max-w-sm p-6">
@@ -16,6 +17,8 @@ function AuthCard({ title, description, children }: { title: string; description
   );
 }
 
+// Firebase emails a secure link; the person sets a new password on Firebase's
+// page, then comes back here to sign in. Invited staff use the same flow.
 export function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
@@ -26,13 +29,17 @@ export function ForgotPasswordPage() {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
-      redirectTo: `${window.location.origin}/set-password`,
-    });
-    setBusy(false);
-    // Do not reveal whether the email exists; only surface connection/rate-limit problems.
-    if (error && /fetch|network|rate|too many/i.test(error.message)) setError(friendlyError(error));
-    else setSent(true);
+    try {
+      await sendPasswordResetEmail(auth, email.trim().toLowerCase(), { url: `${window.location.origin}/login` });
+      setSent(true);
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      // Do not reveal whether the email exists.
+      if (code === "auth/user-not-found" || code === "auth/invalid-email") setSent(true);
+      else setError(friendlyError(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -53,54 +60,6 @@ export function ForgotPasswordPage() {
       <p className="mt-4 text-center text-sm">
         <Link to="/login" className="font-medium text-brand hover:underline">Back to sign in</Link>
       </p>
-    </AuthCard>
-  );
-}
-
-// Used by both invite links (new staff) and password-reset links.
-export function SetPasswordPage() {
-  const { session, loading } = useAuth();
-  const navigate = useNavigate();
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  if (loading) return <FullPageSpinner />;
-  if (!session) {
-    return (
-      <AuthCard title="Link expired" description="This link is no longer valid. Links expire after a short time and can only be used once.">
-        <Link to="/forgot-password"><Button className="w-full">Request a new link</Button></Link>
-      </AuthCard>
-    );
-  }
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    if (password.length < 8) return setError("Use at least 8 characters.");
-    if (password !== confirm) return setError("The two passwords do not match.");
-    setBusy(true);
-    setError(null);
-    const { error } = await supabase.auth.updateUser({ password });
-    setBusy(false);
-    if (error) setError(friendlyError(error));
-    else navigate("/", { replace: true });
-  }
-
-  return (
-    <AuthCard title="Set your password" description={`Choose a password for ${session.user.email ?? "your account"}.`}>
-      <form onSubmit={submit} className="space-y-4">
-        {error && <Alert>{error}</Alert>}
-        <Field label="New password" htmlFor="pw" hint="At least 8 characters.">
-          <input id="pw" type="password" autoComplete="new-password" className="input" value={password} onChange={(e) => setPassword(e.target.value)} />
-        </Field>
-        <Field label="Confirm password" htmlFor="pw2">
-          <input id="pw2" type="password" autoComplete="new-password" className="input" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
-        </Field>
-        <Button type="submit" className="w-full" loading={busy} disabled={!password || !confirm}>
-          Save password and continue
-        </Button>
-      </form>
     </AuthCard>
   );
 }

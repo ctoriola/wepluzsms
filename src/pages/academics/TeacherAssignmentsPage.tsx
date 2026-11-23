@@ -2,9 +2,9 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/auth/AuthProvider";
 import { Alert, Badge, EmptyState, FullPageSpinner, PageHeader } from "@/components/ui";
-import { loadClassSubjects, loadLevels, loadSubjects, loadTeachingStaff, SECTION_LABELS, SECTIONS, type TeacherAssignment } from "@/lib/academics";
-import { must, useAsync } from "@/lib/data";
-import { friendlyError, supabase } from "@/lib/supabase";
+import { loadAssignments, loadClassSubjects, loadLevels, loadSubjects, loadTeachingStaff, SECTION_LABELS, SECTIONS, type TeacherAssignment } from "@/lib/academics";
+import { api, friendlyError } from "@/lib/api";
+import { useAsync } from "@/lib/data";
 
 export function TeacherAssignmentsPage() {
   const { activeSchool, currentTerm } = useAuth();
@@ -15,13 +15,7 @@ export function TeacherAssignmentsPage() {
   const subjects = useAsync(() => loadSubjects(schoolId), [schoolId]);
   const offerings = useAsync(() => loadClassSubjects(schoolId), [schoolId]);
   const staff = useAsync(() => loadTeachingStaff(schoolId), [schoolId]);
-  const assignments = useAsync(
-    async () =>
-      sessionId
-        ? (must(await supabase.from("teacher_assignments").select("id, session_id, class_arm_id, subject_id, teacher_id").eq("school_id", schoolId).eq("session_id", sessionId)) as TeacherAssignment[])
-        : [],
-    [schoolId, sessionId],
-  );
+  const assignments = useAsync(async () => (sessionId ? loadAssignments(schoolId, sessionId) : []), [schoolId, sessionId]);
 
   const [armId, setArmId] = useState<string>("");
   const [saving, setSaving] = useState<string | null>(null);
@@ -52,16 +46,16 @@ export function TeacherAssignmentsPage() {
   }, [assignments.data, subjectById, armLabel, staffById]);
 
   async function assign(subjectId: string, teacherId: string, existing?: TeacherAssignment) {
-    if (!selected || !sessionId) return;
+    if (!selected || !sessionId || (!teacherId && !existing)) return;
     setMessage(null);
     setSaving(subjectId);
-    let error;
-    if (!teacherId && existing) ({ error } = await supabase.from("teacher_assignments").delete().eq("id", existing.id));
-    else if (existing) ({ error } = await supabase.from("teacher_assignments").update({ teacher_id: teacherId }).eq("id", existing.id));
-    else if (teacherId)
-      ({ error } = await supabase.from("teacher_assignments").insert({ school_id: schoolId, session_id: sessionId, class_arm_id: selected.id, subject_id: subjectId, teacher_id: teacherId }));
-    setSaving(null);
-    if (error) setMessage({ tone: "error", text: friendlyError(error) });
+    try {
+      await api("assignments.set", { schoolId, armId: selected.id, subjectId, teacherId: teacherId || null });
+    } catch (err) {
+      setMessage({ tone: "error", text: friendlyError(err) });
+    } finally {
+      setSaving(null);
+    }
     await assignments.reload();
   }
 

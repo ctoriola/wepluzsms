@@ -4,7 +4,7 @@ import { useAuth } from "@/auth/AuthProvider";
 import { Alert, Badge, Button, EmptyState, Field, FullPageSpinner, Modal, PageHeader } from "@/components/ui";
 import { loadSessions, suggestSession, suggestTerm, type AcademicSession, type Term } from "@/lib/academics";
 import { formatDate, useAsync } from "@/lib/data";
-import { friendlyError, supabase } from "@/lib/supabase";
+import { api, friendlyError } from "@/lib/api";
 
 type SessionForm = { id?: string; name: string; start_date: string; end_date: string };
 type TermForm = { id?: string; session: AcademicSession; term_number: number; name: string; start_date: string; end_date: string; next_term_begins: string };
@@ -20,12 +20,15 @@ function SessionModal({ schoolId, initial, onClose, onSaved }: { schoolId: strin
     if (form.end_date <= form.start_date) return setError("The session must end after it starts.");
     setBusy(true);
     setError(null);
-    const res = form.id
-      ? await supabase.from("academic_sessions").update({ name: form.name, start_date: form.start_date, end_date: form.end_date }).eq("id", form.id)
-      : await supabase.from("academic_sessions").insert({ school_id: schoolId, name: form.name, start_date: form.start_date, end_date: form.end_date });
-    setBusy(false);
-    if (res.error) return setError(res.error.code === "23505" ? "That session already exists." : friendlyError(res.error));
-    onSaved();
+    try {
+      const values = { schoolId, name: form.name, startDate: form.start_date, endDate: form.end_date };
+      await (form.id ? api("sessions.update", { ...values, id: form.id }) : api("sessions.create", values));
+      onSaved();
+    } catch (err) {
+      setError(friendlyError(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -65,13 +68,15 @@ function TermModal({ schoolId, initial, onClose, onSaved }: { schoolId: string; 
     if (form.next_term_begins && form.next_term_begins <= form.end_date) return setError("'Next term begins' must be after this term ends.");
     setBusy(true);
     setError(null);
-    const values = { name: form.name.trim(), start_date: form.start_date, end_date: form.end_date, next_term_begins: form.next_term_begins || null };
-    const res = form.id
-      ? await supabase.from("terms").update(values).eq("id", form.id)
-      : await supabase.from("terms").insert({ ...values, school_id: schoolId, session_id: s.id, term_number: form.term_number });
-    setBusy(false);
-    if (res.error) return setError(friendlyError(res.error));
-    onSaved();
+    try {
+      const values = { schoolId, name: form.name.trim(), startDate: form.start_date, endDate: form.end_date, nextTermBegins: form.next_term_begins || null };
+      await (form.id ? api("terms.update", { ...values, id: form.id }) : api("terms.create", { ...values, sessionId: s.id, termNumber: form.term_number }));
+      onSaved();
+    } catch (err) {
+      setError(friendlyError(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -120,18 +125,23 @@ export function CalendarPage() {
   async function makeCurrent(term: Term, session: AcademicSession) {
     setMessage(null);
     setBusyId(term.id);
-    const { error } = await supabase.rpc("set_current_term", { p_term_id: term.id });
-    setBusyId(null);
-    if (error) return setMessage({ tone: "error", text: friendlyError(error) });
+    try {
+      await api("calendar.setCurrentTerm", { schoolId, termId: term.id });
+    } catch (err) {
+      return setMessage({ tone: "error", text: friendlyError(err) });
+    } finally {
+      setBusyId(null);
+    }
     await saved(`${term.name}, ${session.name} is now the current term across the app.`);
   }
 
   async function remove(kind: "term" | "session", id: string, label: string) {
     if (!window.confirm(`Delete ${label}? This cannot be undone.`)) return;
     setMessage(null);
-    const { error } = await supabase.from(kind === "term" ? "terms" : "academic_sessions").delete().eq("id", id);
-    if (error) {
-      return setMessage({ tone: "error", text: error.code === "23503" ? `${label} is already in use and cannot be deleted.` : friendlyError(error) });
+    try {
+      await api(kind === "term" ? "terms.delete" : "sessions.delete", { schoolId, id });
+    } catch (err) {
+      return setMessage({ tone: "error", text: friendlyError(err) });
     }
     await saved(`${label} deleted.`);
   }

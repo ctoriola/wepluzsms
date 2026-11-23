@@ -5,12 +5,11 @@ import { useAuth } from "@/auth/AuthProvider";
 import { Badge, SchoolLogo } from "@/components/ui";
 import { isDemoMode } from "@/lib/demo";
 import { ROLE_LABELS } from "@/lib/roles";
-import { publicAssetUrl } from "@/lib/supabase";
 import { navFor } from "./nav";
 
 function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
-  const { can } = useAuth();
-  const sections = navFor(can);
+  const { can, isPlatformAdmin, activeSchool } = useAuth();
+  const sections = navFor(can, isPlatformAdmin, Boolean(activeSchool));
   return (
     <nav aria-label="Main" className="flex-1 space-y-6 overflow-y-auto px-3 py-4">
       {sections.map((section, i) => (
@@ -56,7 +55,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 function SchoolSwitcher() {
   const { schools, activeSchool, switchSchool, currentTerm } = useAuth();
   if (!activeSchool) return null;
-  const logo = publicAssetUrl(activeSchool.logo_path);
+  const logo = activeSchool.logo;
   return (
     <div className="flex items-center gap-3 border-b border-white/10 px-4 py-4">
       <SchoolLogo url={logo} name={activeSchool.name} size={40} />

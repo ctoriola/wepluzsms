@@ -1,157 +1,75 @@
 # Wepluz School Management System
 
-Multi-school management platform by MANDEXA. Built on Supabase (database, auth, storage, Edge Functions) with a React web app.
+Multi-school management platform by MANDEXA. **Firebase** (Auth + Firestore) for data and sign-in, **Vercel** for hosting the web app and the server API.
 
-Planning documents: [`docs/`](docs/) (feature blueprint and Phase 1 build tasks).
+Planning documents and guides: [`docs/`](docs/). Step-by-step deployment: [`docs/Firebase_Vercel_Deployment_Guide.pdf`](docs/Firebase_Vercel_Deployment_Guide.pdf).
 
-## Run the demo (no WhatsApp, Termii or Paystack needed)
+## No migrations to paste
 
-Demo mode runs the whole app on a free Supabase project with sample data: two schools, every role, a full 2026/2027 calendar, classes, subjects and teacher assignments. The login page shows one-click buttons for each demo person.
+Firestore has no tables to create. Everything is installed for you:
 
-1. Create a free project at supabase.com (any name, e.g. `wepluz-demo`). Save the database password.
-2. Open **SQL Editor** in the Supabase dashboard.
-3. Open each file in `supabase/migrations/` in name order, paste its contents into the editor and click **Run**. Do this for every file.
-4. Paste and run `supabase/seed.sql` the same way. This loads the demo data.
-5. Go to **Authentication > URL Configuration** and set Site URL to `http://localhost:8080`.
-6. Go to **Project Settings > API** and copy the Project URL and the `anon` public key.
-7. On your computer, in this folder, run:
-   ```bash
-   npm install
-   ```
-   ```bash
-   cp .env.example .env.local
-   ```
-8. Edit `.env.local`: paste the URL and anon key, and set `VITE_DEMO_MODE=true`.
-9. Start the app:
-   ```bash
-   npm run dev
-   ```
-10. Open http://localhost:8080 and click any demo account.
+- **`/setup` page**: open it once after deploying, enter your setup token, click **Install demo** (or **Install** for real schools). It publishes the security rules and creates the demo data or your platform admin account.
+- **Every Vercel deploy** re-publishes `firestore.rules` automatically (`scripts/sync-rules.mjs`), so the security rules always match the code.
+- Platform admins can also re-publish the rules any time from **Platform > Schools > Publish rules**.
 
-Demo limits: the Invite button needs the `invite-member` Edge Function deployed (step 3 of the setup below); parent SMS login needs Termii. Everything else works. Never set `VITE_DEMO_MODE=true` on a real school's deployment: the demo passwords are public.
+## Deploy (summary; full steps in the PDF guide)
 
-## Status: WS0 Foundations
+1. Create a Firebase project. Turn on **Email/Password** sign-in. Create a **Firestore** database.
+2. Add a **Web app** in Firebase and copy its config values.
+3. Generate a **service account key** (Project settings > Service accounts).
+4. Import this GitHub repo into **Vercel**. Add the environment variables from `.env.example`.
+5. Deploy, then open `https://your-app.vercel.app/setup` and install.
 
-| Task | What | Status |
+Free tiers are enough to run the demo and a pilot: Firebase **Spark** plan (no card) and Vercel **Hobby**. Vercel's Hobby plan is for non-commercial use, so move to Vercel Pro before charging schools.
+
+## How it is built
+
+```
+api/rpc.ts            the one Vercel Function: POST /api/rpc { action, payload }
+server/
+  core.ts             Firebase Admin, auth check, roles, audit log, input checks
+  actions/            setup, public (branding, SMS codes), people, academics
+  seed.ts             demo schools and accounts
+  template.ts         Nigerian class and subject starter template
+firestore.rules       who can READ what (all writes go through the server)
+src/                  React web app (Vite + TypeScript + Tailwind)
+tests/server/         47 tests against the Firebase emulators (rules + every action)
+scripts/sync-rules.mjs  publishes the rules on each Vercel build
+```
+
+- **Reads**: the browser reads Firestore directly. `firestore.rules` lets people see only their own school, and only what their role allows (e.g. teacher assignments are staff-only, the audit log is proprietor/principal only).
+- **Writes**: every change goes through `/api/rpc`, which checks the person's role and the school rules (unique names, term dates inside the session, no overlapping terms, cannot delete things in use, one teacher per subject per class, last proprietor protected, and more), then writes with an audit log entry.
+- **One function**: all actions share one Vercel Function, keeping well under the Hobby plan's limit of 12.
+- **Logos** are resized in the browser and stored in Firestore, because Firebase Storage now needs the paid Blaze plan.
+- **Parent SMS login** uses Termii: the server sends a 6-digit code and signs the parent in with a Firebase custom token. This works on the free Spark plan (Firebase's own phone sign-in needs Blaze). Until Termii keys are set, the app says so and parents can use email.
+
+## Roles
+
+proprietor, principal, school_admin, bursar, teacher, parent. One person can hold several roles and belong to several schools. MANDEXA platform admins (a Firebase custom claim set by `/setup`) can see and create every school.
+
+## Status
+
+| Workstream | What | Status |
 |---|---|---|
-| 0.01-0.03 | WhatsApp, Termii sender ID, Paystack applications | **You** - external accounts |
-| 0.04-0.07 | Supabase projects, Lovable, n8n | **You** - see setup below |
-| 0.08 | Secrets kept server-side only | Done (`.env.example` holds only public values) |
-| 0.09 | `schools`, `school_settings` | Done |
-| 0.10 | `profiles` synced from `auth.users` | Done |
-| 0.11 | Roles + `school_memberships` (one person can hold several roles / schools) | Done |
-| 0.12 | Access helper functions | Done |
-| 0.13 | RLS on every table, column-level edit limits | Done |
-| 0.14 | Tamper-proof audit log | Done |
-| 0.15 | Staff login, forgot / set password | Done |
-| 0.16 | Parent phone + SMS code login (Termii via Supabase Send SMS hook) | Done |
-| 0.17 | App shell with role-based menu, mobile drawer, school switcher | Done |
-| 0.18 | School profile settings + logo upload | Done |
-| 0.19 | Staff & access: invite, change role, suspend, remove | Done |
-| 0.20 | Development seed data (two schools, every role) | Done |
+| WS0 | Schools, sign-in (staff email, parent SMS code), roles, invites, school profile and logo, audit log, one-click setup | Done |
+| WS1 | Sessions and terms, current term, classes and arms, form tutors, subjects grid, teacher assignments, Nigerian template, teacher "My classes" | Done |
+| WS2 | Student records | Next |
 
-## Status: WS1 Academic structure
+## Local development
 
-| Task | What | Status |
-|---|---|---|
-| 1.01-1.04 | Sessions and terms; one current term per school, switched safely by `set_current_term()` | Done |
-| 1.05-1.09 | Class levels, arms (with form tutors), subjects, subjects per class, teacher assignments | Done |
-| 1.10 | Security: everyone in the school can read the structure; only admins change it; assignments staff-only | Done |
-| 1.11 | Sessions & terms page; current term shown across the app | Done |
-| 1.12 | Classes & arms page with form tutors and ordering | Done |
-| 1.13 | Subjects page with class-by-subject grid (compulsory / elective) | Done |
-| 1.14 | Teacher assignments page with teaching load; teacher dashboard "My classes" | Done |
-| 1.15 | One-click Nigerian starter template (Nursery, Primary, JSS, SS) | Done |
-| 1.16 | Tests for the calendar rules and the term switch | Done |
+Requires Node 20+ and Java 11+ (for the Firebase emulators).
 
-Built-in data rules: term dates must sit inside their session and cannot overlap; class and subject names are unique per school; a class, subject or session in use cannot be deleted; a subject can only be assigned to a class that offers it; form tutors and subject teachers must be teaching staff of the same school.
-
-## Project layout
-
-```
-supabase/
-  migrations/      database schema, security rules, audit log, storage (run in order)
-  functions/
-    invite-member/ invite a person to a school with a role
-    send-sms-hook/ delivers login codes through Termii
-  seed.sql         demo data - development only, never production
-src/               React web app (Vite + TypeScript + Tailwind)
-tests/
-  db/              security tests: 113 checks across every role, school and rule
-  functions/       SMS hook test against a fake Termii server
-docs/              planning PDFs
-```
-
-## How access works
-
-- Every school is a tenant. Every table has row-level security, so a user can only ever read or change rows the database allows, whatever the app does.
-- Access comes from `school_memberships` (person, school, role). A teacher can also be a parent; a proprietor can own several schools.
-- Roles: proprietor, principal, school_admin, bursar, teacher, parent.
-- Proprietors can manage every role. Principals and school admins can manage school_admin, bursar, teacher and parent. Nobody can change their own access, and a school always keeps at least one active proprietor.
-- New memberships are created only by the `invite-member` Edge Function, after the database confirms the caller may grant that role.
-- Changes to schools, settings and memberships are written to `audit_log`, which proprietors and principals can read and nobody can edit or delete.
-
-## Setup (your part)
-
-### 1. Supabase project
-1. Create two projects at supabase.com: `wepluz-dev` and `wepluz-prod` (region closest to Nigeria, e.g. EU West / London).
-2. Install the Supabase CLI, then in this folder:
-   ```bash
-   supabase login
-   ```
-   ```bash
-   supabase link --project-ref YOUR_DEV_PROJECT_REF
-   ```
-   ```bash
-   supabase db push
-   ```
-3. Development only: load demo data by pasting `supabase/seed.sql` into the SQL editor. All demo staff use the password `Password123!`.
-
-### 2. Auth settings (Dashboard > Authentication)
-1. **Sign In / Providers**: turn **off** "Allow new users to sign up". Only invited people can get in.
-2. Enable the **Phone** provider.
-3. **URL Configuration**: Site URL = your app URL. Add `https://YOUR_APP_URL/set-password` (and `http://localhost:8080/set-password` for dev) to Redirect URLs.
-4. **Hooks > Send SMS hook**: choose HTTPS, URL `https://YOUR_PROJECT_REF.supabase.co/functions/v1/send-sms-hook`, click generate secret and copy it.
-
-### 3. Edge Functions
-```bash
-supabase secrets set SEND_SMS_HOOK_SECRET="v1,whsec_..." TERMII_API_KEY="..." TERMII_SENDER_ID="WEPLUZ" TERMII_BASE_URL="https://YOUR_TERMII_BASE_URL" APP_URL="https://YOUR_APP_URL"
-```
-```bash
-supabase functions deploy send-sms-hook --no-verify-jwt
-```
-```bash
-supabase functions deploy invite-member
-```
-`TERMII_CHANNEL` defaults to `dnd` so codes reach DND-registered Nigerian numbers; ask Termii to activate the DND route on your account.
-
-### 4. First school (production bootstrap)
-1. Dashboard > Authentication > Users > **Add user** with your own email and a strong password.
-2. In the SQL editor, make yourself a platform admin and create the school:
-   ```sql
-   insert into public.platform_admins (user_id)
-   select id from auth.users where email = 'you@mandexa.com';
-
-   insert into public.schools (name, slug, short_code)
-   values ('Pilot School Name', 'pilot-school', 'PLT');
-   ```
-3. Sign in to the app. As platform admin you see every school. Open **Staff & access** and invite the school's proprietor.
-
-### 5. Run the web app
 ```bash
 npm install
 ```
 ```bash
-cp .env.example .env.local
+npm run emulators
 ```
-Fill in `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (Project Settings > API), then:
+In a second terminal, with `VITE_USE_EMULATORS=true`, `VITE_DEMO_MODE=true` and any `SETUP_TOKEN` in `.env.local`:
 ```bash
 npm run dev
 ```
-Hosting: any static host works (Netlify, Vercel, Cloudflare Pages). `public/_redirects` handles page routes on Netlify.
-
-### 6. Lovable
-Lovable links a project to a GitHub repository it manages. Check in Lovable whether it can import this repository. If it can't, the app still runs and can be extended without Lovable. Keep business rules in SQL and Edge Functions so screens stay easy to rebuild.
+Open http://localhost:8080/setup, install the demo, then sign in with a demo button.
 
 ## Tests
 
@@ -159,13 +77,6 @@ Lovable links a project to a GitHub repository it manages. Check in Lovable whet
 npm test
 ```
 ```bash
-npm run build
+npm run test:server
 ```
-```bash
-npm run test:db
-```
-`test:db` starts a throwaway PostgreSQL (16+), applies every migration and the seed, then runs the security tests. It needs PostgreSQL installed and must run as a non-root user.
-```bash
-npm run test:functions
-```
-`test:functions` needs Deno.
+The second command starts throwaway Firebase emulators and runs the 47 rules and API tests: tenant isolation, every role's permissions, all school rules, audit entries, and the SMS login flow.

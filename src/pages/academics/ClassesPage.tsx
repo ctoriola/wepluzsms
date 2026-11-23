@@ -4,7 +4,7 @@ import { useAuth } from "@/auth/AuthProvider";
 import { Alert, Button, EmptyState, Field, FullPageSpinner, Modal, PageHeader } from "@/components/ui";
 import { loadLevels, loadTeachingStaff, SECTION_LABELS, SECTIONS, type ClassArm, type ClassLevel, type Section } from "@/lib/academics";
 import { useAsync } from "@/lib/data";
-import { friendlyError, supabase } from "@/lib/supabase";
+import { api, friendlyError } from "@/lib/api";
 
 type LevelForm = { id?: string; name: string; section: Section };
 type ArmForm = { id?: string; level: ClassLevel; name: string; form_tutor_id: string; capacity: string };
@@ -18,11 +18,14 @@ function TemplateModal({ schoolId, existing, onClose, onDone }: { schoolId: stri
     if (picked.length === 0) return setError("Choose at least one section.");
     setBusy(true);
     setError(null);
-    const { data, error } = await supabase.rpc("apply_nigerian_template", { p_school_id: schoolId, p_sections: picked });
-    setBusy(false);
-    if (error) return setError(friendlyError(error));
-    const r = data as { levels_added: number; subjects_added: number; offerings_added: number };
-    onDone(`Added ${r.levels_added} classes and ${r.subjects_added} subjects. Add arms to each class, then review the subjects to match your curriculum.`);
+    try {
+      const r = await api<{ levelsAdded: number; subjectsAdded: number }>("template.apply", { schoolId, sections: picked });
+      onDone(`Added ${r.levelsAdded} classes and ${r.subjectsAdded} subjects. Add arms to each class, then review the subjects to match your curriculum.`);
+    } catch (err) {
+      setError(friendlyError(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -85,16 +88,14 @@ export function ClassesPage() {
     const name = levelModal.name.trim();
     if (!name) return setFormError("Enter the class name, e.g. JSS 1.");
     setBusy(true);
-    let res;
-    if (levelModal.id) {
-      res = await supabase.from("class_levels").update({ name, section: levelModal.section }).eq("id", levelModal.id);
-    } else {
-      const maxOrder = Math.max(0, ...(levels.data ?? []).filter((l) => l.section === levelModal.section).map((l) => l.order_index));
-      const base = { nursery: 0, primary: 100, junior_secondary: 200, senior_secondary: 300 }[levelModal.section];
-      res = await supabase.from("class_levels").insert({ school_id: schoolId, name, section: levelModal.section, order_index: Math.max(maxOrder, base) + 1 });
+    try {
+      const values = { schoolId, name, section: levelModal.section };
+      await (levelModal.id ? api("levels.update", { ...values, id: levelModal.id }) : api("levels.create", values));
+    } catch (err) {
+      return setFormError(friendlyError(err));
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
-    if (res.error) return setFormError(res.error.code === "23505" ? "A class with that name already exists." : friendlyError(res.error));
     await done(`Class ${name} saved.`);
   }
 
@@ -106,41 +107,35 @@ export function ClassesPage() {
     const capacity = armModal.capacity.trim() ? Number(armModal.capacity) : null;
     if (capacity !== null && (!Number.isInteger(capacity) || capacity < 1 || capacity > 200)) return setFormError("Capacity must be a whole number between 1 and 200.");
     setBusy(true);
-    const values = { name, form_tutor_id: armModal.form_tutor_id || null, capacity };
-    const res = armModal.id
-      ? await supabase.from("class_arms").update(values).eq("id", armModal.id)
-      : await supabase.from("class_arms").insert({ ...values, school_id: schoolId, class_level_id: armModal.level.id });
-    setBusy(false);
-    if (res.error) return setFormError(res.error.code === "23505" ? "This class already has an arm with that name." : friendlyError(res.error));
+    try {
+      const values = { schoolId, name, formTutorId: armModal.form_tutor_id || null, capacity };
+      await (armModal.id ? api("arms.update", { ...values, id: armModal.id }) : api("arms.create", { ...values, levelId: armModal.level.id }));
+    } catch (err) {
+      return setFormError(friendlyError(err));
+    } finally {
+      setBusy(false);
+    }
     await done(`${armModal.level.name} ${name} saved.`);
   }
 
   async function move(level: ClassLevel, dir: -1 | 1) {
-    const siblings = bySection.get(level.section) ?? [];
-    const i = siblings.findIndex((l) => l.id === level.id);
-    const other = siblings[i + dir];
-    if (!other) return;
     setMessage(null);
-    // Swap order positions (give distinct values if they were equal).
-    const a = level.order_index === other.order_index ? other.order_index + dir : other.order_index;
-    const r1 = await supabase.from("class_levels").update({ order_index: a }).eq("id", level.id);
-    const r2 = await supabase.from("class_levels").update({ order_index: level.order_index }).eq("id", other.id);
-    if (r1.error || r2.error) setMessage({ tone: "error", text: friendlyError(r1.error ?? r2.error) });
+    try {
+      await api("levels.move", { schoolId, id: level.id, direction: dir });
+    } catch (err) {
+      setMessage({ tone: "error", text: friendlyError(err) });
+    }
     await levels.reload();
   }
 
   async function remove(kind: "level" | "arm", id: string, label: string) {
     if (!window.confirm(`Delete ${label}?`)) return;
     setMessage(null);
-    if (kind === "level") {
-      // A class with no arms has no teachers, so its subject list can go with it.
-      const cleared = await supabase.from("class_subjects").delete().eq("class_level_id", id);
-      if (cleared.error) return setMessage({ tone: "error", text: friendlyError(cleared.error) });
-    }
-    const { error } = await supabase.from(kind === "level" ? "class_levels" : "class_arms").delete().eq("id", id);
-    if (error) {
-      const inUse = error.code === "23503";
-      return setMessage({ tone: "error", text: inUse ? `${label} is in use (it has ${kind === "level" ? "arms or subjects" : "teachers assigned"}). Remove those first.` : friendlyError(error) });
+    try {
+      await api(kind === "level" ? "levels.delete" : "arms.delete", { schoolId, id });
+    } catch (err) {
+      setArmModal(null);
+      return setMessage({ tone: "error", text: friendlyError(err) });
     }
     await done(`${label} deleted.`);
   }

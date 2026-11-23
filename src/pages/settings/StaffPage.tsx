@@ -1,42 +1,17 @@
+import { sendPasswordResetEmail } from "firebase/auth";
+import { collection, getDocs } from "firebase/firestore";
 import { Search, UserPlus, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { useAuth } from "@/auth/AuthProvider";
 import { Alert, Badge, Button, Field, FullPageSpinner, PageHeader } from "@/components/ui";
+import { api, friendlyError } from "@/lib/api";
+import { useAsync } from "@/lib/data";
+import { auth, db } from "@/lib/firebase";
 import { formatPhone, normalizePhone } from "@/lib/phone";
 import { manageableRoles, ROLE_LABELS, type Role } from "@/lib/roles";
-import { friendlyError, supabase } from "@/lib/supabase";
 
-type MembershipRow = {
-  id: string;
-  user_id: string;
-  role: Role;
-  status: "active" | "suspended";
-  created_at: string;
-  profiles: { full_name: string | null; email: string | null; phone: string | null } | null;
-};
-
-type Person = {
-  user_id: string;
-  name: string;
-  email: string | null;
-  phone: string | null;
-  memberships: MembershipRow[];
-};
-
+type Member = { uid: string; fullName: string | null; email: string | null; phone: string | null; roles: Role[]; status: "active" | "suspended" };
 type Filter = "staff" | "parents" | "all";
-
-async function invokeError(error: unknown): Promise<string> {
-  const ctx = (error as { context?: Response }).context;
-  if (ctx && typeof ctx.json === "function") {
-    try {
-      const body = await ctx.json();
-      if (body?.error) return String(body.error);
-    } catch {
-      /* fall through */
-    }
-  }
-  return friendlyError(error);
-}
 
 function InvitePanel({ schoolId, allowedRoles, onDone, onClose }: { schoolId: string; allowedRoles: Role[]; onDone: (msg: string) => void; onClose: () => void }) {
   const [fullName, setFullName] = useState("");
@@ -53,28 +28,32 @@ function InvitePanel({ schoolId, allowedRoles, onDone, onClose }: { schoolId: st
     if (fullName.trim().length < 2) return setError("Enter the person's full name.");
     const normalized = method === "phone" ? normalizePhone(phone) : null;
     if (method === "phone" && !normalized) return setError("Enter a valid phone number, e.g. 0803 123 4567.");
-    if (method === "email" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) return setError("Enter a valid email address.");
+    const cleanEmail = email.trim().toLowerCase();
+    if (method === "email" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(cleanEmail)) return setError("Enter a valid email address.");
 
     setBusy(true);
-    const { data, error } = await supabase.functions.invoke("invite-member", {
-      body: {
-        school_id: schoolId,
+    try {
+      const out = await api<{ created: boolean; sendPasswordEmail: boolean }>("members.invite", {
+        schoolId,
         role,
-        full_name: fullName.trim(),
-        ...(method === "email" ? { email: email.trim().toLowerCase() } : { phone: normalized }),
-      },
-    });
-    setBusy(false);
-    if (error) return setError(await invokeError(error));
-
-    const who = fullName.trim();
-    onDone(
-      data?.created === false
-        ? `${who} already had an account, so the ${ROLE_LABELS[role]} role was added to it.`
-        : method === "email"
-          ? `Invite sent to ${email.trim()}. ${who} will get an email to set a password.`
-          : `${who} can now sign in on the Parent tab with ${formatPhone(normalized)} and an SMS code.`,
-    );
+        fullName: fullName.trim(),
+        ...(method === "email" ? { email: cleanEmail } : { phone: normalized }),
+      });
+      // New staff get Firebase's "set your password" email.
+      if (out.sendPasswordEmail) await sendPasswordResetEmail(auth, cleanEmail, { url: `${window.location.origin}/login` }).catch(() => undefined);
+      const who = fullName.trim();
+      onDone(
+        !out.created
+          ? `${who} already had an account, so the ${ROLE_LABELS[role]} role was added to it.`
+          : method === "email"
+            ? `Invite sent to ${cleanEmail}. ${who} will get an email to set a password.`
+            : `${who} can now sign in on the Parent tab with ${formatPhone(normalized)} and an SMS code.`,
+      );
+    } catch (err) {
+      setError(friendlyError(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -93,21 +72,15 @@ function InvitePanel({ schoolId, allowedRoles, onDone, onClose }: { schoolId: st
           </Field>
           <Field label="Role" htmlFor="inv-role">
             <select id="inv-role" className="input" value={role} onChange={(e) => setRole(e.target.value as Role)}>
-              {allowedRoles.map((r) => (
-                <option key={r} value={r}>{ROLE_LABELS[r]}</option>
-              ))}
+              {allowedRoles.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
             </select>
           </Field>
         </div>
         <fieldset>
           <legend className="label">How will they sign in?</legend>
-          <div className="flex gap-4 text-sm">
-            <label className="flex items-center gap-2">
-              <input type="radio" name="method" checked={method === "email"} onChange={() => setMethod("email")} /> Email and password
-            </label>
-            <label className="flex items-center gap-2">
-              <input type="radio" name="method" checked={method === "phone"} onChange={() => setMethod("phone")} /> Phone and SMS code
-            </label>
+          <div className="flex flex-wrap gap-4 text-sm">
+            <label className="flex items-center gap-2"><input type="radio" name="method" checked={method === "email"} onChange={() => setMethod("email")} /> Email and password</label>
+            <label className="flex items-center gap-2"><input type="radio" name="method" checked={method === "phone"} onChange={() => setMethod("phone")} /> Phone and SMS code</label>
           </div>
         </fieldset>
         {method === "email" ? (
@@ -121,9 +94,7 @@ function InvitePanel({ schoolId, allowedRoles, onDone, onClose }: { schoolId: st
         )}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="submit" loading={busy}>
-            <UserPlus className="h-4 w-4" aria-hidden /> Send invite
-          </Button>
+          <Button type="submit" loading={busy}><UserPlus className="h-4 w-4" aria-hidden /> Send invite</Button>
         </div>
       </form>
     </section>
@@ -134,82 +105,44 @@ export function StaffPage() {
   const { activeSchool, roles, isPlatformAdmin, profile } = useAuth();
   const schoolId = activeSchool!.id;
   const allowed = useMemo(() => manageableRoles(roles, isPlatformAdmin), [roles, isPlatformAdmin]);
-  const [rows, setRows] = useState<MembershipRow[] | null>(null);
+  const members = useAsync(async () => (await getDocs(collection(db, "schools", schoolId, "members"))).docs.map((d) => d.data() as Member), [schoolId]);
   const [filter, setFilter] = useState<Filter>("staff");
   const [query, setQuery] = useState("");
   const [inviteOpen, setInviteOpen] = useState(false);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("school_memberships")
-      .select("id, user_id, role, status, created_at, profiles!school_memberships_user_id_fkey(full_name, email, phone)")
-      .eq("school_id", schoolId)
-      .order("created_at");
-    if (error) setMessage({ tone: "error", text: friendlyError(error) });
-    setRows((data ?? []) as unknown as MembershipRow[]);
-  }, [schoolId]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
   const people = useMemo(() => {
-    const map = new Map<string, Person>();
-    for (const m of rows ?? []) {
-      const p = map.get(m.user_id) ?? {
-        user_id: m.user_id,
-        name: m.profiles?.full_name || m.profiles?.email || formatPhone(m.profiles?.phone) || "Unnamed",
-        email: m.profiles?.email ?? null,
-        phone: m.profiles?.phone ?? null,
-        memberships: [],
-      };
-      p.memberships.push(m);
-      map.set(m.user_id, p);
-    }
     const q = query.trim().toLowerCase();
-    return [...map.values()]
-      .filter((p) => {
-        const isParent = p.memberships.some((m) => m.role === "parent");
-        const isStaff = p.memberships.some((m) => m.role !== "parent");
+    return (members.data ?? [])
+      .filter((m) => {
+        const isParent = m.roles.includes("parent");
+        const isStaff = m.roles.some((r) => r !== "parent");
         if (filter === "staff" && !isStaff) return false;
         if (filter === "parents" && !isParent) return false;
-        return !q || [p.name, p.email, p.phone, formatPhone(p.phone)].some((v) => v?.toLowerCase().includes(q));
+        return !q || [m.fullName, m.email, m.phone, formatPhone(m.phone)].some((v) => v?.toLowerCase().includes(q));
       })
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [rows, filter, query]);
+      .sort((a, b) => (a.fullName ?? "").localeCompare(b.fullName ?? ""));
+  }, [members.data, filter, query]);
 
-  async function act(m: MembershipRow, action: "suspend" | "reactivate" | "remove" | Role) {
+  async function act(m: Member, action: string, payload: Record<string, unknown>, confirmText?: string) {
+    if (confirmText && !window.confirm(confirmText)) return;
     setMessage(null);
-    if (action === "remove" && !window.confirm(`Remove the ${ROLE_LABELS[m.role]} role from this person?`)) return;
-    setBusyId(m.id);
-    const q = supabase.from("school_memberships");
-    const { error, count } =
-      action === "remove"
-        ? await q.delete({ count: "exact" }).eq("id", m.id)
-        : action === "suspend" || action === "reactivate"
-          ? await q.update({ status: action === "suspend" ? "suspended" : "active" }, { count: "exact" }).eq("id", m.id)
-          : await q.update({ role: action }, { count: "exact" }).eq("id", m.id);
-    setBusyId(null);
-    if (error) {
-      const text = error.code === "23505" ? "This person already has that role." : friendlyError(error);
-      setMessage({ tone: "error", text });
-    } else if (count === 0) {
-      setMessage({ tone: "error", text: "You do not have permission to change this person's access." });
-    } else {
-      await load();
+    setBusyId(m.uid);
+    try {
+      await api(action, { schoolId, uid: m.uid, ...payload });
+      await members.reload();
+    } catch (err) {
+      setMessage({ tone: "error", text: friendlyError(err) });
+    } finally {
+      setBusyId(null);
     }
   }
 
-  if (rows === null) return <FullPageSpinner />;
+  if (members.loading && !members.data) return <FullPageSpinner />;
 
   const filterBtn = (f: Filter, label: string) => (
-    <button
-      onClick={() => setFilter(f)}
-      className={`rounded-md px-3 py-1.5 text-sm font-medium ${filter === f ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
-      aria-pressed={filter === f}
-    >
+    <button onClick={() => setFilter(f)} aria-pressed={filter === f} className={`rounded-md px-3 py-1.5 text-sm font-medium ${filter === f ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}>
       {label}
     </button>
   );
@@ -219,19 +152,10 @@ export function StaffPage() {
       <PageHeader
         title="Staff & access"
         description="Invite people and control what they can see and do."
-        actions={
-          allowed.length > 0 && !inviteOpen ? (
-            <Button onClick={() => setInviteOpen(true)}>
-              <UserPlus className="h-4 w-4" aria-hidden /> Invite
-            </Button>
-          ) : undefined
-        }
+        actions={allowed.length > 0 && !inviteOpen ? <Button onClick={() => setInviteOpen(true)}><UserPlus className="h-4 w-4" aria-hidden /> Invite</Button> : undefined}
       />
-      {message && (
-        <div className="mb-4">
-          <Alert tone={message.tone}>{message.text}</Alert>
-        </div>
-      )}
+      {members.error && <div className="mb-4"><Alert>{members.error}</Alert></div>}
+      {message && <div className="mb-4"><Alert tone={message.tone}>{message.text}</Alert></div>}
       {inviteOpen && (
         <InvitePanel
           schoolId={schoolId}
@@ -240,7 +164,7 @@ export function StaffPage() {
           onDone={(text) => {
             setInviteOpen(false);
             setMessage({ tone: "success", text });
-            void load();
+            void members.reload();
           }}
         />
       )}
@@ -260,56 +184,67 @@ export function StaffPage() {
 
       <div className="card divide-y divide-slate-100">
         {people.length === 0 && <p className="p-6 text-center text-sm text-slate-500">No one matches this view yet.</p>}
-        {people.map((p) => (
-          <div key={p.user_id} className="flex flex-col gap-3 p-4 md:flex-row md:items-center">
-            <div className="min-w-0 flex-1">
-              <p className="truncate font-medium">
-                {p.name}
-                {p.user_id === profile?.id && <span className="ml-2 text-xs font-normal text-slate-400">(you)</span>}
-              </p>
-              <p className="truncate text-sm text-slate-500">{[p.email, formatPhone(p.phone)].filter(Boolean).join(" · ")}</p>
-            </div>
-            <div className="flex flex-col gap-2 md:items-end">
-              {p.memberships.map((m) => {
-                const canManage = allowed.includes(m.role) && m.user_id !== profile?.id;
-                return (
-                  <div key={m.id} className="flex flex-wrap items-center gap-2">
-                    {canManage ? (
-                      <select
-                        aria-label={`Role for ${p.name}`}
-                        className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs"
-                        value={m.role}
-                        disabled={busyId === m.id}
-                        onChange={(e) => void act(m, e.target.value as Role)}
+        {people.map((m) => {
+          const isMe = m.uid === profile?.id;
+          const canManage = !isMe && m.roles.every((r) => allowed.includes(r));
+          const addable = allowed.filter((r) => !m.roles.includes(r));
+          const busy = busyId === m.uid;
+          return (
+            <div key={m.uid} className="flex flex-col gap-3 p-4 md:flex-row md:items-center">
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-medium">
+                  {m.fullName || m.email || formatPhone(m.phone) || "Unnamed"}
+                  {isMe && <span className="ml-2 text-xs font-normal text-slate-400">(you)</span>}
+                </p>
+                <p className="truncate text-sm text-slate-500">{[m.email, formatPhone(m.phone)].filter(Boolean).join(" · ")}</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                {m.roles.map((r) => (
+                  <span key={r} className="inline-flex items-center gap-1 rounded-full bg-brand/10 py-0.5 pl-2 pr-1 text-xs font-medium text-brand">
+                    {ROLE_LABELS[r]}
+                    {canManage && m.roles.length > 1 && (
+                      <button
+                        className="rounded-full p-0.5 hover:bg-brand/20 disabled:opacity-40"
+                        disabled={busy}
+                        aria-label={`Remove ${ROLE_LABELS[r]} role from ${m.fullName}`}
+                        onClick={() => void act(m, "members.setRoles", { roles: m.roles.filter((x) => x !== r) })}
                       >
-                        {allowed.map((r) => (
-                          <option key={r} value={r}>{ROLE_LABELS[r]}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <Badge tone="brand">{ROLE_LABELS[m.role]}</Badge>
+                        <X className="h-3 w-3" />
+                      </button>
                     )}
-                    {m.status === "suspended" && <Badge tone="amber">Suspended</Badge>}
-                    {canManage && (
-                      <>
-                        <button
-                          className="text-xs font-medium text-slate-600 hover:underline disabled:opacity-50"
-                          disabled={busyId === m.id}
-                          onClick={() => void act(m, m.status === "active" ? "suspend" : "reactivate")}
-                        >
-                          {m.status === "active" ? "Suspend" : "Reactivate"}
-                        </button>
-                        <button className="text-xs font-medium text-red-600 hover:underline disabled:opacity-50" disabled={busyId === m.id} onClick={() => void act(m, "remove")}>
-                          Remove
-                        </button>
-                      </>
-                    )}
-                  </div>
-                );
-              })}
+                  </span>
+                ))}
+                {m.status === "suspended" && <Badge tone="amber">Suspended</Badge>}
+                {canManage && addable.length > 0 && (
+                  <select
+                    aria-label={`Add a role for ${m.fullName}`}
+                    className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs"
+                    value=""
+                    disabled={busy}
+                    onChange={(e) => e.target.value && void act(m, "members.setRoles", { roles: [...m.roles, e.target.value] })}
+                  >
+                    <option value="">+ Role</option>
+                    {addable.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+                  </select>
+                )}
+                {canManage && (
+                  <>
+                    <button className="text-xs font-medium text-slate-600 hover:underline disabled:opacity-50" disabled={busy} onClick={() => void act(m, "members.setStatus", { status: m.status === "active" ? "suspended" : "active" })}>
+                      {m.status === "active" ? "Suspend" : "Reactivate"}
+                    </button>
+                    <button
+                      className="text-xs font-medium text-red-600 hover:underline disabled:opacity-50"
+                      disabled={busy}
+                      onClick={() => void act(m, "members.remove", {}, `Remove ${m.fullName ?? "this person"} from ${activeSchool!.name}?`)}
+                    >
+                      Remove
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </>
   );

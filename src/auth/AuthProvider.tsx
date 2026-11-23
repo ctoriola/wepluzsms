@@ -1,15 +1,16 @@
-import type { Session } from "@supabase/supabase-js";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { onAuthStateChanged, signOut as fbSignOut, type User } from "firebase/auth";
+import { collection, doc, getDoc, getDocs, onSnapshot } from "firebase/firestore";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { api } from "@/lib/api";
 import { applyBranding } from "@/lib/branding";
+import { auth, db } from "@/lib/firebase";
 import { hasAny, type Role } from "@/lib/roles";
-import { supabase } from "@/lib/supabase";
 
 export type Profile = {
   id: string;
   full_name: string | null;
   email: string | null;
   phone: string | null;
-  avatar_path: string | null;
   active_school_id: string | null;
 };
 
@@ -18,13 +19,12 @@ export type SchoolInfo = {
   name: string;
   slug: string;
   short_code: string;
-  logo_path: string | null;
+  /** Logo as a data URL (stored small inside Firestore), or null. */
+  logo: string | null;
   primary_color: string;
   accent_color: string;
   motto: string | null;
 };
-
-type Membership = { id: string; school_id: string; role: Role };
 
 export type CurrentTerm = {
   id: string;
@@ -36,16 +36,32 @@ export type CurrentTerm = {
   session_name: string;
 };
 
+type UserDoc = {
+  fullName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  activeSchoolId?: string | null;
+  memberships?: Record<string, { roles: Role[]; status: string }>;
+};
+
+type SchoolDoc = {
+  name: string;
+  slug: string;
+  shortCode: string;
+  status: string;
+  currentTermId?: string | null;
+  settings?: { motto?: string | null; primaryColor?: string; accentColor?: string; hasLogo?: boolean; logoVersion?: number };
+};
+
 type AuthState = {
   loading: boolean;
-  /** Set when the user's school data could not be loaded (e.g. no internet). */
+  /** Set when school data could not be loaded (e.g. no internet). */
   loadError: string | null;
-  session: Session | null;
+  session: User | null;
   profile: Profile | null;
   isPlatformAdmin: boolean;
   schools: SchoolInfo[];
   activeSchool: SchoolInfo | null;
-  /** The active school's current term (null until one is set). */
   currentTerm: CurrentTerm | null;
   refreshCalendar: () => Promise<void>;
   /** Roles the user holds in the active school. */
@@ -59,167 +75,202 @@ type AuthState = {
 
 const AuthContext = createContext<AuthState | null>(null);
 
-const SCHOOL_COLUMNS = "id, name, slug, short_code, school_settings(logo_path, primary_color, accent_color, motto)";
-
-type SchoolRow = {
-  id: string;
-  name: string;
-  slug: string;
-  short_code: string;
-  school_settings: Partial<SchoolInfo> | Partial<SchoolInfo>[] | null;
-};
-
-function toSchoolInfo(row: SchoolRow): SchoolInfo {
-  const s = Array.isArray(row.school_settings) ? row.school_settings[0] : row.school_settings;
-  return {
-    id: row.id,
-    name: row.name,
-    slug: row.slug,
-    short_code: row.short_code,
-    logo_path: s?.logo_path ?? null,
-    primary_color: s?.primary_color ?? "#14213D",
-    accent_color: s?.accent_color ?? "#0F766E",
-    motto: s?.motto ?? null,
-  };
-}
+const toInfo = (id: string, s: SchoolDoc, logo: string | null): SchoolInfo => ({
+  id,
+  name: s.name,
+  slug: s.slug,
+  short_code: s.shortCode,
+  logo,
+  primary_color: s.settings?.primaryColor ?? "#14213D",
+  accent_color: s.settings?.accentColor ?? "#0F766E",
+  motto: s.settings?.motto ?? null,
+});
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null);
-  const [sessionChecked, setSessionChecked] = useState(false);
-  const [loadedFor, setLoadedFor] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
-  const [schools, setSchools] = useState<SchoolInfo[]>([]);
-  const [memberships, setMemberships] = useState<Membership[]>([]);
+  const [userDoc, setUserDoc] = useState<UserDoc | null>(null);
+  const [userDocFor, setUserDocFor] = useState<string | null>(null);
+  const [schools, setSchools] = useState<SchoolInfo[] | null>(null);
   const [activeSchoolId, setActiveSchoolId] = useState<string | null>(null);
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setSessionChecked(true);
-    });
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession);
-      setSessionChecked(true);
-    });
-    return () => sub.subscription.unsubscribe();
-  }, []);
-
-  const userId = session?.user.id ?? null;
-
-  const load = useCallback(async () => {
-    if (!userId) {
-      setProfile(null);
-      setSchools([]);
-      setMemberships([]);
-      setIsPlatformAdmin(false);
-      setActiveSchoolId(null);
-      setLoadedFor(null);
-      return;
-    }
-    setLoadError(null);
-    try {
-      const [profileRes, memberRes, adminRes] = await Promise.all([
-        supabase.from("profiles").select("id, full_name, email, phone, avatar_path, active_school_id").eq("id", userId).maybeSingle(),
-        supabase.from("school_memberships").select(`id, school_id, role, schools(${SCHOOL_COLUMNS})`).eq("user_id", userId).eq("status", "active"),
-        supabase.from("platform_admins").select("user_id").eq("user_id", userId).maybeSingle(),
-      ]);
-      const failed = profileRes.error ?? memberRes.error ?? adminRes.error;
-      if (failed) throw failed;
-      const platformAdmin = Boolean(adminRes.data);
-      const memberRows = (memberRes.data ?? []) as unknown as (Membership & { schools: SchoolRow | null })[];
-
-      let schoolList: SchoolInfo[];
-      if (platformAdmin) {
-        const { data } = await supabase.from("schools").select(SCHOOL_COLUMNS).eq("status", "active").order("name");
-        schoolList = ((data ?? []) as unknown as SchoolRow[]).map(toSchoolInfo);
-      } else {
-        const byId = new Map<string, SchoolInfo>();
-        for (const m of memberRows) if (m.schools) byId.set(m.schools.id, toSchoolInfo(m.schools));
-        schoolList = [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
-      }
-
-      const p = (profileRes.data as Profile | null) ?? null;
-      setProfile(p);
-      setIsPlatformAdmin(platformAdmin);
-      setMemberships(memberRows.map(({ id, school_id, role }) => ({ id, school_id, role })));
-      setSchools(schoolList);
-      setActiveSchoolId((current) => {
-        const preferred = current ?? p?.active_school_id;
-        return schoolList.some((s) => s.id === preferred) ? preferred! : schoolList[0]?.id ?? null;
-      });
-    } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Could not load your account.");
-    } finally {
-      setLoadedFor(userId);
-    }
-  }, [userId]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const activeSchool = schools.find((s) => s.id === activeSchoolId) ?? null;
-
+  const [activeDoc, setActiveDoc] = useState<SchoolDoc | null>(null);
+  const [logo, setLogo] = useState<string | null>(null);
   const [currentTerm, setCurrentTerm] = useState<CurrentTerm | null>(null);
-  const refreshCalendar = useCallback(async () => {
-    if (!activeSchoolId) {
-      setCurrentTerm(null);
-      return;
-    }
-    const { data } = await supabase
-      .from("terms")
-      .select("id, name, start_date, end_date, next_term_begins, session_id, academic_sessions(name)")
-      .eq("school_id", activeSchoolId)
-      .eq("is_current", true)
-      .maybeSingle();
-    const row = data as (Omit<CurrentTerm, "session_name"> & { academic_sessions: { name: string } | null }) | null;
-    setCurrentTerm(row ? { ...row, session_name: row.academic_sessions?.name ?? "" } : null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [schoolsKey, setSchoolsKey] = useState(0);
+
+  // 1. Who is signed in (and are they a platform admin?)
+  useEffect(
+    () =>
+      onAuthStateChanged(auth, async (u) => {
+        setUser(u);
+        setIsPlatformAdmin(u ? (await u.getIdTokenResult()).claims.platformAdmin === true : false);
+        setAuthChecked(true);
+      }),
+    [],
+  );
+
+  const uid = user?.uid ?? null;
+
+  // 2. Their profile and memberships, live.
+  useEffect(() => {
+    setUserDoc(null);
+    setUserDocFor(null);
+    setSchools(null);
+    if (!uid) return;
+    return onSnapshot(
+      doc(db, "users", uid),
+      (snap) => {
+        setUserDoc((snap.data() as UserDoc | undefined) ?? {});
+        setUserDocFor(uid);
+        setLoadError(null);
+      },
+      (err) => {
+        setLoadError(err.message);
+        setUserDocFor(uid);
+      },
+    );
+  }, [uid, reloadKey]);
+
+  const membershipKey = JSON.stringify(userDoc?.memberships ?? {});
+
+  // 3. The schools they can open.
+  useEffect(() => {
+    if (!uid || userDocFor !== uid) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        let list: SchoolInfo[];
+        if (isPlatformAdmin) {
+          const snap = await getDocs(collection(db, "schools"));
+          list = snap.docs.filter((d) => d.data().status === "active").map((d) => toInfo(d.id, d.data() as SchoolDoc, null));
+        } else {
+          const ids = Object.entries(userDoc?.memberships ?? {})
+            .filter(([, m]) => m.status === "active")
+            .map(([sid]) => sid);
+          const docs = await Promise.all(ids.map((sid) => getDoc(doc(db, "schools", sid)).catch(() => null)));
+          list = docs.filter((d) => d?.exists() && d.data()?.status === "active").map((d) => toInfo(d!.id, d!.data() as SchoolDoc, null));
+        }
+        if (!cancelled) setSchools(list.sort((a, b) => a.name.localeCompare(b.name)));
+      } catch (err) {
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : "Could not load your schools.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [uid, userDocFor, isPlatformAdmin, membershipKey, schoolsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 4. Pick the active school.
+  useEffect(() => {
+    if (!schools) return;
+    setActiveSchoolId((current) => {
+      const preferred = current ?? userDoc?.activeSchoolId ?? null;
+      return schools.some((s) => s.id === preferred) ? preferred : schools[0]?.id ?? null;
+    });
+  }, [schools, userDoc?.activeSchoolId]);
+
+  // 5. Watch the active school (name, colours, logo version, current term), live.
+  useEffect(() => {
+    setActiveDoc(null);
+    if (!activeSchoolId) return;
+    return onSnapshot(doc(db, "schools", activeSchoolId), (snap) => setActiveDoc((snap.data() as SchoolDoc) ?? null), () => setActiveDoc(null));
   }, [activeSchoolId]);
 
+  const logoVersion = activeDoc?.settings?.hasLogo ? activeDoc.settings.logoVersion ?? 1 : 0;
   useEffect(() => {
-    void refreshCalendar();
+    setLogo(null);
+    if (!activeSchoolId || !logoVersion) return;
+    getDoc(doc(db, "schools", activeSchoolId, "assets", "logo"))
+      .then((s) => setLogo((s.data()?.dataUrl as string | undefined) ?? null))
+      .catch(() => setLogo(null));
+  }, [activeSchoolId, logoVersion]);
+
+  // Always read the current term id fresh (never from a stale closure), and let
+  // only the most recent request update state, so overlapping refreshes cannot
+  // put an old term back on screen.
+  const calendarRequest = useRef(0);
+  const refreshCalendar = useCallback(async () => {
+    const req = ++calendarRequest.current;
+    const apply = (t: CurrentTerm | null) => req === calendarRequest.current && setCurrentTerm(t);
+    if (!activeSchoolId) return void apply(null);
+    const termId = (await getDoc(doc(db, "schools", activeSchoolId))).data()?.currentTermId as string | undefined;
+    if (!termId) return void apply(null);
+    const t = await getDoc(doc(db, "schools", activeSchoolId, "terms", termId));
+    const td = t.data();
+    if (!td) return void apply(null);
+    const s = await getDoc(doc(db, "schools", activeSchoolId, "sessions", td.sessionId));
+    apply({
+      id: t.id,
+      name: td.name,
+      start_date: td.startDate,
+      end_date: td.endDate,
+      next_term_begins: td.nextTermBegins ?? null,
+      session_id: td.sessionId,
+      session_name: (s.data()?.name as string | undefined) ?? "",
+    });
+  }, [activeSchoolId, activeDoc?.currentTermId]);
+
+  useEffect(() => {
+    void refreshCalendar().catch(() => setCurrentTerm(null));
   }, [refreshCalendar]);
+
+  const activeSchool = useMemo(
+    () => (activeSchoolId && activeDoc ? toInfo(activeSchoolId, activeDoc, logo) : schools?.find((s) => s.id === activeSchoolId) ?? null),
+    [activeSchoolId, activeDoc, logo, schools],
+  );
 
   useEffect(() => {
     applyBranding(activeSchool?.primary_color, activeSchool?.accent_color);
   }, [activeSchool?.primary_color, activeSchool?.accent_color]);
 
-  const roles = useMemo(
-    () => memberships.filter((m) => m.school_id === activeSchoolId).map((m) => m.role),
-    [memberships, activeSchoolId],
-  );
+  const roles = useMemo(() => {
+    const m = activeSchoolId ? userDoc?.memberships?.[activeSchoolId] : undefined;
+    return m && m.status === "active" ? m.roles : [];
+  }, [userDoc, activeSchoolId]);
 
   const can = useCallback((wanted: Role[]) => isPlatformAdmin || hasAny(roles, wanted), [isPlatformAdmin, roles]);
 
-  const switchSchool = useCallback(
-    async (schoolId: string) => {
-      setActiveSchoolId(schoolId);
-      if (userId) await supabase.from("profiles").update({ active_school_id: schoolId }).eq("id", userId);
-    },
-    [userId],
-  );
+  const switchSchool = useCallback(async (schoolId: string) => {
+    setActiveSchoolId(schoolId);
+    await api("me.setActiveSchool", { schoolId }).catch(() => undefined);
+  }, []);
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
+    await fbSignOut(auth);
     setActiveSchoolId(null);
   }, []);
 
+  const profile: Profile | null = user
+    ? {
+        id: user.uid,
+        full_name: userDoc?.fullName ?? user.displayName ?? null,
+        email: userDoc?.email ?? user.email ?? null,
+        phone: userDoc?.phone ?? user.phoneNumber ?? null,
+        active_school_id: userDoc?.activeSchoolId ?? null,
+      }
+    : null;
+
   const value: AuthState = {
-    loading: !sessionChecked || (userId !== null && loadedFor !== userId),
+    loading: !authChecked || (uid !== null && (userDocFor !== uid || (schools === null && !loadError))),
     loadError,
-    session,
+    session: user,
     profile,
     isPlatformAdmin,
-    schools,
+    schools: schools ?? [],
     activeSchool,
     currentTerm,
     refreshCalendar,
     roles,
     can,
     switchSchool,
-    refresh: load,
+    // Re-read the school list in place (no loading screen); after an error, also reconnect.
+    refresh: async () => {
+      if (loadError) setReloadKey((k) => k + 1);
+      setSchoolsKey((k) => k + 1);
+    },
     signOut,
   };
 

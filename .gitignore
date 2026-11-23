@@ -5,6 +5,9 @@ dist
 .env.*.local
 *.log
 .DS_Store
-supabase/.branches
-supabase/.temp
-supabase/functions/.env
+
+.firebase
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+.vercel

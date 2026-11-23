@@ -6,9 +6,11 @@ import { Alert, Button, Field, SchoolLogo } from "@/components/ui";
 import { applyBranding, schoolSlugFromLocation } from "@/lib/branding";
 import { DEMO_ACCOUNTS, DEMO_PASSWORD, isDemoMode } from "@/lib/demo";
 import { formatPhone, normalizePhone } from "@/lib/phone";
-import { friendlyError, isSupabaseConfigured, publicAssetUrl, supabase } from "@/lib/supabase";
+import { signInWithCustomToken, signInWithEmailAndPassword } from "firebase/auth";
+import { api, friendlyError } from "@/lib/api";
+import { auth, isFirebaseConfigured } from "@/lib/firebase";
 
-type Branding = { name: string; logo_path: string | null; motto: string | null };
+type Branding = { name: string; logo: string | null; motto: string | null; primaryColor: string; accentColor: string };
 
 const RESEND_SECONDS = 60;
 
@@ -16,14 +18,15 @@ function useSchoolBranding(): Branding | null {
   const [branding, setBranding] = useState<Branding | null>(null);
   useEffect(() => {
     const slug = schoolSlugFromLocation();
-    if (!slug || !isSupabaseConfigured) return;
-    supabase.rpc("get_school_branding", { p_slug: slug }).then(({ data }) => {
-      const row = Array.isArray(data) ? data[0] : null;
-      if (row) {
-        setBranding({ name: row.name, logo_path: row.logo_path, motto: row.motto });
-        applyBranding(row.primary_color, row.accent_color);
-      }
-    });
+    if (!slug || !isFirebaseConfigured) return;
+    api<Branding | null>("branding.get", { slug })
+      .then((b) => {
+        if (b) {
+          setBranding(b);
+          applyBranding(b.primaryColor, b.accentColor);
+        }
+      })
+      .catch(() => undefined);
   }, []);
   return branding;
 }
@@ -38,9 +41,13 @@ function StaffLogin() {
     e.preventDefault();
     setError(null);
     setBusy(true);
-    const { error } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
-    setBusy(false);
-    if (error) setError(friendlyError(error));
+    try {
+      await signInWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
+    } catch (err) {
+      setError(friendlyError(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -81,15 +88,17 @@ function ParentLogin() {
   async function sendCode(target: string) {
     setError(null);
     setBusy(true);
-    // shouldCreateUser: false - only parents the school has registered can log in.
-    const { error } = await supabase.auth.signInWithOtp({ phone: target, options: { shouldCreateUser: false } });
-    setBusy(false);
-    if (error) {
-      setError(friendlyError(error));
+    try {
+      // Only parents the school has registered can get a code.
+      await api("otp.request", { phone: target });
+      setResendIn(RESEND_SECONDS);
+      return true;
+    } catch (err) {
+      setError(friendlyError(err));
       return false;
+    } finally {
+      setBusy(false);
     }
-    setResendIn(RESEND_SECONDS);
-    return true;
   }
 
   async function requestCode(e: FormEvent) {
@@ -107,9 +116,14 @@ function ParentLogin() {
     if (!phone) return;
     setError(null);
     setBusy(true);
-    const { error } = await supabase.auth.verifyOtp({ phone, token: code.trim(), type: "sms" });
-    setBusy(false);
-    if (error) setError(friendlyError(error));
+    try {
+      const { customToken } = await api<{ customToken: string }>("otp.verify", { phone, code: code.trim() });
+      await signInWithCustomToken(auth, customToken);
+    } catch (err) {
+      setError(friendlyError(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (!phone) {
@@ -167,9 +181,13 @@ function DemoAccounts() {
   async function signIn(email: string) {
     setError(null);
     setBusy(email);
-    const { error } = await supabase.auth.signInWithPassword({ email, password: DEMO_PASSWORD });
-    setBusy(null);
-    if (error) setError(`${friendlyError(error)} Has the demo seed data been loaded?`);
+    try {
+      await signInWithEmailAndPassword(auth, email, DEMO_PASSWORD);
+    } catch (err) {
+      setError(`${friendlyError(err)} Has the demo been installed at /setup?`);
+    } finally {
+      setBusy(null);
+    }
   }
 
   return (
@@ -199,6 +217,14 @@ export function LoginPage() {
   const location = useLocation();
   const branding = useSchoolBranding();
   const [tab, setTab] = useState<"staff" | "parent">("staff");
+  const [installed, setInstalled] = useState(true);
+
+  useEffect(() => {
+    if (!isFirebaseConfigured) return;
+    api<{ installed: boolean }>("setup.status")
+      .then((s) => setInstalled(s.installed))
+      .catch(() => undefined);
+  }, []);
 
   if (!loading && session) {
     const from = (location.state as { from?: string } | null)?.from ?? "/";
@@ -213,14 +239,21 @@ export function LoginPage() {
     <div className="flex min-h-full flex-col items-center justify-center bg-gradient-to-b from-brand/5 to-slate-50 px-4 py-10">
       <div className="w-full max-w-sm">
         <div className="mb-6 flex flex-col items-center text-center">
-          <SchoolLogo url={publicAssetUrl(branding?.logo_path)} name={name} size={64} />
+          <SchoolLogo url={branding?.logo ?? null} name={name} size={64} />
           <h1 className="mt-4 text-xl font-bold text-slate-900">{name}</h1>
           <p className="mt-1 text-sm text-slate-500">{branding?.motto ?? "Sign in to continue"}</p>
         </div>
 
-        {!isSupabaseConfigured && (
+        {!isFirebaseConfigured && (
           <div className="mb-4">
-            <Alert>App not configured: copy .env.example to .env.local and add your Supabase URL and anon key.</Alert>
+            <Alert>App not configured: add the VITE_FIREBASE_* settings (see .env.example), then redeploy.</Alert>
+          </div>
+        )}
+        {isFirebaseConfigured && !installed && (
+          <div className="mb-4">
+            <Alert tone="info">
+              Wepluz is not installed on this Firebase project yet. <Link to="/setup" className="font-semibold underline">Open setup</Link>
+            </Alert>
           </div>
         )}
 
@@ -235,7 +268,7 @@ export function LoginPage() {
           </div>
           {tab === "staff" ? <StaffLogin /> : <ParentLogin />}
           {isDemoMode && tab === "parent" && (
-            <p className="mt-3 text-xs text-slate-500">Demo: SMS codes need Termii. Use the Parent demo account below instead.</p>
+            <p className="mt-3 text-xs text-slate-500">Demo: SMS codes need Termii keys on the server. Use the Parent demo account below instead.</p>
           )}
         </div>
         {isDemoMode && <DemoAccounts />}

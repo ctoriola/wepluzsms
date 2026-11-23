@@ -15,7 +15,7 @@ import {
   type SubjectCategory,
 } from "@/lib/academics";
 import { useAsync } from "@/lib/data";
-import { friendlyError, supabase } from "@/lib/supabase";
+import { api, friendlyError } from "@/lib/api";
 
 type SubjectForm = { id?: string; name: string; short_code: string; category: SubjectCategory };
 type Cell = "none" | "compulsory" | "elective";
@@ -74,16 +74,13 @@ export function SubjectsPage() {
     const next: Cell = !current ? "compulsory" : current.is_compulsory ? "elective" : "none";
     setMessage(null);
     setSavingCell(key);
-    let error;
-    if (next === "compulsory") {
-      ({ error } = await supabase.from("class_subjects").insert({ school_id: schoolId, class_level_id: levelId, subject_id: subjectId, is_compulsory: true }));
-    } else if (next === "elective") {
-      ({ error } = await supabase.from("class_subjects").update({ is_compulsory: false }).eq("id", current!.id));
-    } else {
-      ({ error } = await supabase.from("class_subjects").delete().eq("id", current!.id));
+    try {
+      await api("levels.setSubject", { schoolId, levelId, subjectId, state: next });
+    } catch (err) {
+      setMessage({ tone: "error", text: friendlyError(err) });
+    } finally {
+      setSavingCell(null);
     }
-    setSavingCell(null);
-    if (error) setMessage({ tone: "error", text: friendlyError(error) });
     await offerings.reload();
   }
 
@@ -95,10 +92,14 @@ export function SubjectsPage() {
     if (name.length < 2) return setFormError("Enter the subject name.");
     if (!/^[A-Z0-9]{2,8}$/.test(code)) return setFormError("Code must be 2-8 letters or numbers, e.g. MTH.");
     setBusy(true);
-    const values = { name, short_code: code, category: modal.category };
-    const res = modal.id ? await supabase.from("subjects").update(values).eq("id", modal.id) : await supabase.from("subjects").insert({ ...values, school_id: schoolId });
-    setBusy(false);
-    if (res.error) return setFormError(res.error.code === "23505" ? "A subject with that name or code already exists." : friendlyError(res.error));
+    try {
+      const values = { schoolId, name, shortCode: code, category: modal.category };
+      await (modal.id ? api("subjects.update", { ...values, id: modal.id }) : api("subjects.create", values));
+    } catch (err) {
+      return setFormError(friendlyError(err));
+    } finally {
+      setBusy(false);
+    }
     setModal(null);
     setMessage({ tone: "success", text: `${name} saved.${modal.id ? "" : " Tick the classes that offer it in the 'Subjects by class' tab."}` });
     await subjects.reload();
@@ -106,9 +107,10 @@ export function SubjectsPage() {
 
   async function deleteSubject(id: string, name: string) {
     if (!window.confirm(`Delete ${name}?`)) return;
-    const { error } = await supabase.from("subjects").delete().eq("id", id);
-    if (error) {
-      return setFormError(error.code === "23503" ? `${name} is still offered in some classes. Untick it in 'Subjects by class' first.` : friendlyError(error));
+    try {
+      await api("subjects.delete", { schoolId, id });
+    } catch (err) {
+      return setFormError(friendlyError(err));
     }
     setModal(null);
     setMessage({ tone: "success", text: `${name} deleted.` });
