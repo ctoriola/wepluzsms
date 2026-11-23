@@ -2,6 +2,9 @@ import {
   BookOpen,
   Building2,
   CalendarCheck,
+  CalendarDays,
+  ClipboardList,
+  Layers,
   GraduationCap,
   HeartHandshake,
   LayoutDashboard,
@@ -33,9 +36,17 @@ export const NAV: NavSection[] = [
     title: "Academics",
     items: [
       { label: "Students", to: "/students", icon: Users, roles: STAFF_ROLES, comingIn: "WS2" },
-      { label: "Classes & subjects", to: "/classes", icon: BookOpen, roles: ADMIN_ROLES, comingIn: "WS1" },
       { label: "Attendance", to: "/attendance", icon: CalendarCheck, roles: TEACHING, comingIn: "WS3" },
       { label: "Results", to: "/results", icon: GraduationCap, roles: TEACHING, comingIn: "WS4" },
+    ],
+  },
+  {
+    title: "School setup",
+    items: [
+      { label: "Sessions & terms", to: "/academics/calendar", icon: CalendarDays, roles: ADMIN_ROLES },
+      { label: "Classes & arms", to: "/academics/classes", icon: Layers, roles: ADMIN_ROLES },
+      { label: "Subjects", to: "/academics/subjects", icon: BookOpen, roles: ADMIN_ROLES },
+      { label: "Teacher assignments", to: "/academics/teachers", icon: ClipboardList, roles: ADMIN_ROLES },
     ],
   },
   {

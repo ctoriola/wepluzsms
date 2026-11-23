@@ -55,6 +55,16 @@ begin
     v_school := (v_row ->> 'school_id')::uuid;
   end if;
 
+  -- When a whole school is deleted, its rows are removed by cascade. Log the
+  -- school's own deletion (without the school link, which no longer exists)
+  -- and skip the individual child rows.
+  if v_school is not null and not exists (select 1 from public.schools s where s.id = v_school) then
+    if tg_table_name <> 'schools' then
+      return coalesce(new, old);
+    end if;
+    v_school := null;
+  end if;
+
   v_record := coalesce(v_row ->> 'id', v_row ->> 'school_id', v_row ->> 'user_id');
 
   begin

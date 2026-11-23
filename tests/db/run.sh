@@ -28,4 +28,8 @@ done
 echo "Applying seed..."
 "${QUIET_SETUP[@]}" -f "$ROOT/supabase/seed.sql"
 echo "Running tests..."
-"${PSQL[@]}" -o /dev/null -f "${TEST_FILE:-$ROOT/tests/db/rls_test.sql}" 2>&1 | sed 's/^psql:[^ ]* NOTICE:  /  /'
+if [ -n "${TEST_FILE:-}" ]; then TESTS=("$TEST_FILE"); else TESTS=("$ROOT"/tests/db/*_test.sql); fi
+ARGS=(-f "$ROOT/tests/db/00_helpers.sql")
+for t in "${TESTS[@]}"; do ARGS+=(-f "$t"); done
+"${PSQL[@]}" -o /dev/null "${ARGS[@]}" 2>&1 | sed 's/^psql:[^ ]* NOTICE:  /  /'
+echo "ALL TESTS PASSED"

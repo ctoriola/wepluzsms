@@ -1,5 +1,5 @@
-import { Loader2 } from "lucide-react";
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { Loader2, X } from "lucide-react";
+import { useEffect, type ButtonHTMLAttributes, type ReactNode } from "react";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger";
 
@@ -99,6 +99,37 @@ export function SchoolLogo({ url, name, size = 40 }: { url: string | null; name:
   ) : (
     <div className="flex shrink-0 items-center justify-center rounded-lg bg-brand font-bold text-white" style={{ width: size, height: size, fontSize: size * 0.38 }} aria-hidden>
       {initials || "S"}
+    </div>
+  );
+}
+
+export function Modal({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="absolute inset-0 bg-slate-900/50" onClick={onClose} />
+      <div className={`relative max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl ${wide ? "sm:max-w-2xl" : "sm:max-w-md"}`}>
+        <div className="mb-4 flex items-center justify-between gap-4">
+          <h2 className="text-lg font-semibold">{title}</h2>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100" aria-label="Close">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export function EmptyState({ title, children }: { title: string; children?: ReactNode }) {
+  return (
+    <div className="card flex flex-col items-center px-6 py-10 text-center">
+      <h2 className="font-semibold">{title}</h2>
+      {children && <div className="mt-2 max-w-md text-sm text-slate-600">{children}</div>}
     </div>
   );
 }

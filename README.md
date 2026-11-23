@@ -4,6 +4,32 @@ Multi-school management platform by MANDEXA. Built on Supabase (database, auth, 
 
 Planning documents: [`docs/`](docs/) (feature blueprint and Phase 1 build tasks).
 
+## Run the demo (no WhatsApp, Termii or Paystack needed)
+
+Demo mode runs the whole app on a free Supabase project with sample data: two schools, every role, a full 2026/2027 calendar, classes, subjects and teacher assignments. The login page shows one-click buttons for each demo person.
+
+1. Create a free project at supabase.com (any name, e.g. `wepluz-demo`). Save the database password.
+2. Open **SQL Editor** in the Supabase dashboard.
+3. Open each file in `supabase/migrations/` in name order, paste its contents into the editor and click **Run**. Do this for every file.
+4. Paste and run `supabase/seed.sql` the same way. This loads the demo data.
+5. Go to **Authentication > URL Configuration** and set Site URL to `http://localhost:8080`.
+6. Go to **Project Settings > API** and copy the Project URL and the `anon` public key.
+7. On your computer, in this folder, run:
+   ```bash
+   npm install
+   ```
+   ```bash
+   cp .env.example .env.local
+   ```
+8. Edit `.env.local`: paste the URL and anon key, and set `VITE_DEMO_MODE=true`.
+9. Start the app:
+   ```bash
+   npm run dev
+   ```
+10. Open http://localhost:8080 and click any demo account.
+
+Demo limits: the Invite button needs the `invite-member` Edge Function deployed (step 3 of the setup below); parent SMS login needs Termii. Everything else works. Never set `VITE_DEMO_MODE=true` on a real school's deployment: the demo passwords are public.
+
 ## Status: WS0 Foundations
 
 | Task | What | Status |
@@ -24,6 +50,22 @@ Planning documents: [`docs/`](docs/) (feature blueprint and Phase 1 build tasks)
 | 0.19 | Staff & access: invite, change role, suspend, remove | Done |
 | 0.20 | Development seed data (two schools, every role) | Done |
 
+## Status: WS1 Academic structure
+
+| Task | What | Status |
+|---|---|---|
+| 1.01-1.04 | Sessions and terms; one current term per school, switched safely by `set_current_term()` | Done |
+| 1.05-1.09 | Class levels, arms (with form tutors), subjects, subjects per class, teacher assignments | Done |
+| 1.10 | Security: everyone in the school can read the structure; only admins change it; assignments staff-only | Done |
+| 1.11 | Sessions & terms page; current term shown across the app | Done |
+| 1.12 | Classes & arms page with form tutors and ordering | Done |
+| 1.13 | Subjects page with class-by-subject grid (compulsory / elective) | Done |
+| 1.14 | Teacher assignments page with teaching load; teacher dashboard "My classes" | Done |
+| 1.15 | One-click Nigerian starter template (Nursery, Primary, JSS, SS) | Done |
+| 1.16 | Tests for the calendar rules and the term switch | Done |
+
+Built-in data rules: term dates must sit inside their session and cannot overlap; class and subject names are unique per school; a class, subject or session in use cannot be deleted; a subject can only be assigned to a class that offers it; form tutors and subject teachers must be teaching staff of the same school.
+
 ## Project layout
 
 ```
@@ -35,7 +77,7 @@ supabase/
   seed.sql         demo data - development only, never production
 src/               React web app (Vite + TypeScript + Tailwind)
 tests/
-  db/              security tests: 63 checks across every role and tenant
+  db/              security tests: 113 checks across every role, school and rule
   functions/       SMS hook test against a fake Termii server
 docs/              planning PDFs
 ```

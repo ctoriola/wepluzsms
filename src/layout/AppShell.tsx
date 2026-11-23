@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "@/auth/AuthProvider";
 import { Badge, SchoolLogo } from "@/components/ui";
+import { isDemoMode } from "@/lib/demo";
 import { ROLE_LABELS } from "@/lib/roles";
 import { publicAssetUrl } from "@/lib/supabase";
 import { navFor } from "./nav";
@@ -53,7 +54,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 function SchoolSwitcher() {
-  const { schools, activeSchool, switchSchool } = useAuth();
+  const { schools, activeSchool, switchSchool, currentTerm } = useAuth();
   if (!activeSchool) return null;
   const logo = publicAssetUrl(activeSchool.logo_path);
   return (
@@ -79,7 +80,9 @@ function SchoolSwitcher() {
         ) : (
           <p className="truncate text-sm font-semibold text-white">{activeSchool.name}</p>
         )}
-        {activeSchool.motto && <p className="truncate text-xs text-white/60">{activeSchool.motto}</p>}
+        <p className="truncate text-xs text-white/60">
+          {currentTerm ? `${currentTerm.name} · ${currentTerm.session_name}` : activeSchool.motto ?? "No current term set"}
+        </p>
       </div>
     </div>
   );
@@ -112,7 +115,7 @@ function UserBlock() {
 export function AppShell() {
   const [open, setOpen] = useState(false);
   const location = useLocation();
-  const { activeSchool, roles } = useAuth();
+  const { activeSchool, roles, currentTerm } = useAuth();
 
   useEffect(() => setOpen(false), [location.pathname]);
 
@@ -147,11 +150,19 @@ export function AppShell() {
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
+        {isDemoMode && (
+          <div className="bg-amber-100 px-4 py-1.5 text-center text-xs font-medium text-amber-900" role="note">
+            Demo mode: sample data only. Do not enter real student or parent information.
+          </div>
+        )}
         <header className="flex items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 lg:hidden">
           <button onClick={() => setOpen(true)} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100" aria-label="Open menu">
             <Menu className="h-5 w-5" />
           </button>
-          <p className="min-w-0 flex-1 truncate text-sm font-semibold">{activeSchool?.name}</p>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold">{activeSchool?.name}</p>
+            {currentTerm && <p className="truncate text-xs text-slate-500">{currentTerm.name} · {currentTerm.session_name}</p>}
+          </div>
           {roles[0] && <Badge tone="brand">{ROLE_LABELS[roles[0]]}</Badge>}
         </header>
         <main className="flex-1 overflow-y-auto">

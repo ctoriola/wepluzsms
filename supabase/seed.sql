@@ -5,8 +5,9 @@
 --   Wepluz Demo Academy (slug wepluz-demo) - one user per role
 --   Greenfield College   (slug greenfield)  - a second, separate school
 --
--- All staff log in with email + password:  Password123!
--- Parents log in with phone + OTP (in local dev, read the OTP from Supabase logs).
+-- Everyone logs in with email + password:  Password123!
+-- Demo parents also have phone numbers, so phone + SMS code login works once
+-- Termii is connected. In demo mode they use email + password instead.
 --
 -- Later workstreams extend this file with classes (WS1), students (WS2), etc.
 -- =============================================================================
@@ -55,8 +56,8 @@ select pg_temp.seed_user('00000000-0000-0000-0000-0000000000b3', 'admin@demo.tes
 select pg_temp.seed_user('00000000-0000-0000-0000-0000000000b4', 'bursar@demo.test', null, 'Ibrahim Musa');
 select pg_temp.seed_user('00000000-0000-0000-0000-0000000000b5', 'teacher1@demo.test', null, 'Funmi Adeyemi');
 select pg_temp.seed_user('00000000-0000-0000-0000-0000000000b6', 'teacher2@demo.test', null, 'Chinedu Obi');
-select pg_temp.seed_user('00000000-0000-0000-0000-0000000000b7', null, '2348030000001', 'Mrs Bisi Lawal');
-select pg_temp.seed_user('00000000-0000-0000-0000-0000000000b8', null, '2348030000002', 'Mr Emeka Nwosu');
+select pg_temp.seed_user('00000000-0000-0000-0000-0000000000b7', 'parent1@demo.test', '2348030000001', 'Mrs Bisi Lawal');
+select pg_temp.seed_user('00000000-0000-0000-0000-0000000000b8', 'parent2@demo.test', '2348030000002', 'Mr Emeka Nwosu');
 -- Greenfield College
 select pg_temp.seed_user('00000000-0000-0000-0000-0000000000c1', 'proprietor@greenfield.test', null, 'Halima Yusuf');
 select pg_temp.seed_user('00000000-0000-0000-0000-0000000000c2', 'teacher@greenfield.test', null, 'Segun Ojo');
@@ -95,3 +96,54 @@ insert into public.school_memberships (school_id, user_id, role) values
   ('22222222-2222-2222-2222-222222222222', '00000000-0000-0000-0000-0000000000c1', 'proprietor'),
   ('22222222-2222-2222-2222-222222222222', '00000000-0000-0000-0000-0000000000c2', 'teacher')
 on conflict (school_id, user_id, role) do nothing;
+
+-- =============================================================================
+-- WS1: academic calendar and class structure for the demo
+-- =============================================================================
+insert into public.academic_sessions (id, school_id, name, start_date, end_date) values
+  ('33333333-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', '2026/2027', '2026-09-07', '2027-07-23'),
+  ('33333333-0000-0000-0000-000000000002', '22222222-2222-2222-2222-222222222222', '2026/2027', '2026-09-14', '2027-07-16')
+on conflict (id) do nothing;
+
+insert into public.terms (id, school_id, session_id, term_number, name, start_date, end_date, next_term_begins) values
+  ('33333333-0000-0000-0000-000000000011', '11111111-1111-1111-1111-111111111111', '33333333-0000-0000-0000-000000000001', 1, 'First Term',  '2026-09-07', '2026-12-11', '2027-01-11'),
+  ('33333333-0000-0000-0000-000000000012', '11111111-1111-1111-1111-111111111111', '33333333-0000-0000-0000-000000000001', 2, 'Second Term', '2027-01-11', '2027-04-01', '2027-04-26'),
+  ('33333333-0000-0000-0000-000000000013', '11111111-1111-1111-1111-111111111111', '33333333-0000-0000-0000-000000000001', 3, 'Third Term',  '2027-04-26', '2027-07-23', null),
+  ('33333333-0000-0000-0000-000000000021', '22222222-2222-2222-2222-222222222222', '33333333-0000-0000-0000-000000000002', 1, 'First Term',  '2026-09-14', '2026-12-18', '2027-01-11')
+on conflict (id) do nothing;
+
+select public.set_current_term('33333333-0000-0000-0000-000000000011');
+select public.set_current_term('33333333-0000-0000-0000-000000000021');
+
+select public.apply_nigerian_template('11111111-1111-1111-1111-111111111111', array['primary', 'junior_secondary', 'senior_secondary']);
+select public.apply_nigerian_template('22222222-2222-2222-2222-222222222222', array['junior_secondary', 'senior_secondary']);
+
+-- Arms: Primary has one arm (A); JSS and SS have A and B.
+insert into public.class_arms (school_id, class_level_id, name, capacity)
+select l.school_id, l.id, arm, 30
+  from public.class_levels l
+  cross join lateral unnest(case when l.section = 'primary' then array['A'] else array['A', 'B'] end) as arm
+ where l.school_id in ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222')
+on conflict do nothing;
+
+-- Form tutors
+update public.class_arms a set form_tutor_id = '00000000-0000-0000-0000-0000000000b5'
+  from public.class_levels l where l.id = a.class_level_id and l.school_id = '11111111-1111-1111-1111-111111111111' and l.name = 'JSS 1' and a.name = 'A';
+update public.class_arms a set form_tutor_id = '00000000-0000-0000-0000-0000000000b6'
+  from public.class_levels l where l.id = a.class_level_id and l.school_id = '11111111-1111-1111-1111-111111111111' and l.name = 'JSS 1' and a.name = 'B';
+
+-- Subject teachers for the current session
+insert into public.teacher_assignments (school_id, session_id, class_arm_id, subject_id, teacher_id)
+select '11111111-1111-1111-1111-111111111111', '33333333-0000-0000-0000-000000000001', a.id, s.id, t.teacher
+  from (values
+    ('JSS 1', 'A', 'Mathematics',    '00000000-0000-0000-0000-0000000000b5'::uuid),
+    ('JSS 1', 'B', 'Mathematics',    '00000000-0000-0000-0000-0000000000b5'::uuid),
+    ('JSS 2', 'A', 'Mathematics',    '00000000-0000-0000-0000-0000000000b5'::uuid),
+    ('JSS 1', 'A', 'English Studies', '00000000-0000-0000-0000-0000000000b6'::uuid),
+    ('JSS 1', 'B', 'English Studies', '00000000-0000-0000-0000-0000000000b6'::uuid),
+    ('JSS 1', 'A', 'Basic Science',  '00000000-0000-0000-0000-0000000000b6'::uuid)
+  ) as t(level_name, arm_name, subject_name, teacher)
+  join public.class_levels l on l.school_id = '11111111-1111-1111-1111-111111111111' and l.name = t.level_name
+  join public.class_arms a on a.class_level_id = l.id and a.name = t.arm_name
+  join public.subjects s on s.school_id = '11111111-1111-1111-1111-111111111111' and s.name = t.subject_name
+on conflict do nothing;

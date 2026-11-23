@@ -3,6 +3,10 @@ import { AuthProvider } from "@/auth/AuthProvider";
 import { RequireAuth, RequireRole } from "@/auth/guards";
 import { AppShell } from "@/layout/AppShell";
 import { ADMIN_ROLES } from "@/lib/roles";
+import { CalendarPage } from "@/pages/academics/CalendarPage";
+import { ClassesPage } from "@/pages/academics/ClassesPage";
+import { SubjectsPage } from "@/pages/academics/SubjectsPage";
+import { TeacherAssignmentsPage } from "@/pages/academics/TeacherAssignmentsPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { ForgotPasswordPage, SetPasswordPage } from "@/pages/PasswordPages";
@@ -36,6 +40,10 @@ export default function App() {
             }
           >
             <Route index element={<DashboardPage />} />
+            <Route path="academics/calendar" element={<RequireRole roles={ADMIN_ROLES}><CalendarPage /></RequireRole>} />
+            <Route path="academics/classes" element={<RequireRole roles={ADMIN_ROLES}><ClassesPage /></RequireRole>} />
+            <Route path="academics/subjects" element={<RequireRole roles={ADMIN_ROLES}><SubjectsPage /></RequireRole>} />
+            <Route path="academics/teachers" element={<RequireRole roles={ADMIN_ROLES}><TeacherAssignmentsPage /></RequireRole>} />
             <Route path="settings/school" element={<RequireRole roles={ADMIN_ROLES}><SchoolProfilePage /></RequireRole>} />
             <Route path="settings/staff" element={<RequireRole roles={ADMIN_ROLES}><StaffPage /></RequireRole>} />
             <Route path="*" element={<NotFound />} />

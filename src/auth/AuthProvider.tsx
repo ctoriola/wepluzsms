@@ -26,6 +26,16 @@ export type SchoolInfo = {
 
 type Membership = { id: string; school_id: string; role: Role };
 
+export type CurrentTerm = {
+  id: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+  next_term_begins: string | null;
+  session_id: string;
+  session_name: string;
+};
+
 type AuthState = {
   loading: boolean;
   /** Set when the user's school data could not be loaded (e.g. no internet). */
@@ -35,6 +45,9 @@ type AuthState = {
   isPlatformAdmin: boolean;
   schools: SchoolInfo[];
   activeSchool: SchoolInfo | null;
+  /** The active school's current term (null until one is set). */
+  currentTerm: CurrentTerm | null;
+  refreshCalendar: () => Promise<void>;
   /** Roles the user holds in the active school. */
   roles: Role[];
   /** True if the user holds any of the given roles in the active school (platform admins always pass). */
@@ -149,6 +162,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const activeSchool = schools.find((s) => s.id === activeSchoolId) ?? null;
 
+  const [currentTerm, setCurrentTerm] = useState<CurrentTerm | null>(null);
+  const refreshCalendar = useCallback(async () => {
+    if (!activeSchoolId) {
+      setCurrentTerm(null);
+      return;
+    }
+    const { data } = await supabase
+      .from("terms")
+      .select("id, name, start_date, end_date, next_term_begins, session_id, academic_sessions(name)")
+      .eq("school_id", activeSchoolId)
+      .eq("is_current", true)
+      .maybeSingle();
+    const row = data as (Omit<CurrentTerm, "session_name"> & { academic_sessions: { name: string } | null }) | null;
+    setCurrentTerm(row ? { ...row, session_name: row.academic_sessions?.name ?? "" } : null);
+  }, [activeSchoolId]);
+
+  useEffect(() => {
+    void refreshCalendar();
+  }, [refreshCalendar]);
+
   useEffect(() => {
     applyBranding(activeSchool?.primary_color, activeSchool?.accent_color);
   }, [activeSchool?.primary_color, activeSchool?.accent_color]);
@@ -181,6 +214,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isPlatformAdmin,
     schools,
     activeSchool,
+    currentTerm,
+    refreshCalendar,
     roles,
     can,
     switchSchool,

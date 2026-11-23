@@ -4,6 +4,7 @@ import { Link, Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/auth/AuthProvider";
 import { Alert, Button, Field, SchoolLogo } from "@/components/ui";
 import { applyBranding, schoolSlugFromLocation } from "@/lib/branding";
+import { DEMO_ACCOUNTS, DEMO_PASSWORD, isDemoMode } from "@/lib/demo";
 import { formatPhone, normalizePhone } from "@/lib/phone";
 import { friendlyError, isSupabaseConfigured, publicAssetUrl, supabase } from "@/lib/supabase";
 
@@ -159,6 +160,40 @@ function ParentLogin() {
   );
 }
 
+function DemoAccounts() {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function signIn(email: string) {
+    setError(null);
+    setBusy(email);
+    const { error } = await supabase.auth.signInWithPassword({ email, password: DEMO_PASSWORD });
+    setBusy(null);
+    if (error) setError(`${friendlyError(error)} Has the demo seed data been loaded?`);
+  }
+
+  return (
+    <section className="card mt-4 p-4" aria-labelledby="demo-title">
+      <h2 id="demo-title" className="text-sm font-semibold">Try a demo account</h2>
+      <p className="mt-0.5 text-xs text-slate-500">One click signs you in as that person. Password for all: {DEMO_PASSWORD}</p>
+      {error && <div className="mt-3"><Alert>{error}</Alert></div>}
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        {DEMO_ACCOUNTS.map((a) => (
+          <button
+            key={a.email}
+            onClick={() => void signIn(a.email)}
+            disabled={busy !== null}
+            className="rounded-lg border border-slate-200 px-3 py-2 text-left hover:border-brand/40 hover:bg-brand/5 disabled:opacity-50"
+          >
+            <span className="block text-sm font-medium">{busy === a.email ? "Signing in..." : a.label}</span>
+            <span className="block truncate text-xs text-slate-500">{a.who}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function LoginPage() {
   const { session, loading } = useAuth();
   const location = useLocation();
@@ -199,7 +234,11 @@ export function LoginPage() {
             </button>
           </div>
           {tab === "staff" ? <StaffLogin /> : <ParentLogin />}
+          {isDemoMode && tab === "parent" && (
+            <p className="mt-3 text-xs text-slate-500">Demo: SMS codes need Termii. Use the Parent demo account below instead.</p>
+          )}
         </div>
+        {isDemoMode && <DemoAccounts />}
         <p className="mt-6 text-center text-xs text-slate-400">Powered by MANDEXA</p>
       </div>
     </div>

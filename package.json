@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:db": "bash tests/db/run.sh",
-    "test:functions": "deno test --allow-net --allow-env --allow-run --allow-read tests/functions/"
+    "test:functions": "deno test --config supabase/functions/deno.json --allow-net --allow-env --allow-run --allow-read tests/functions/"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.45.4",
