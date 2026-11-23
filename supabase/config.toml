@@ -1,0 +1,11 @@
+# Supabase CLI project settings (used by `supabase link`, `supabase db push`,
+# `supabase functions deploy`). Hosted auth settings such as the SMS hook are
+# configured in the Supabase dashboard; see README.md.
+project_id = "wepluzsms"
+
+[functions.send-sms-hook]
+# Called by Supabase Auth with a signed request, not by a signed-in user.
+verify_jwt = false
+
+[functions.invite-member]
+verify_jwt = true
