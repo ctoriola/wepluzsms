@@ -99,6 +99,53 @@ service cloud.firestore {
         allow read: if isStaff(sid);
         allow write: if false;
       }
+
+      // ---------------------------------------------------------------- students
+      // Leadership and the bursar see every student. Teachers see students in
+      // the arms they teach (arm.teacherIds, kept up to date by the server).
+      // Parents see only their own children.
+      function seesAllStudents() {
+        return hasRole(sid, ['proprietor', 'principal', 'school_admin', 'bursar']);
+      }
+      function teachesArm(armId) {
+        return armId != null
+          && isStaff(sid)
+          && get(/databases/$(database)/documents/schools/$(sid)/classArms/$(armId)).data.get('teacherIds', []).hasAny([request.auth.uid]);
+      }
+      function isParentOf(student) {
+        return isMember(sid) && student.get('parentUids', []).hasAny([request.auth.uid]);
+      }
+      function studentDoc(studentId) {
+        return get(/databases/$(database)/documents/schools/$(sid)/students/$(studentId)).data;
+      }
+
+      match /students/{studentId} {
+        allow read: if seesAllStudents() || teachesArm(resource.data.currentArmId) || isParentOf(resource.data);
+        allow write: if false;
+      }
+      match /studentPhotos/{studentId} {
+        allow read: if seesAllStudents() || teachesArm(studentDoc(studentId).currentArmId) || isParentOf(studentDoc(studentId));
+        allow write: if false;
+      }
+      // Medical details: leadership and the child's own parents only.
+      match /studentMedical/{studentId} {
+        allow read: if isAdmin(sid) || isParentOf(studentDoc(studentId));
+        allow write: if false;
+      }
+      match /guardians/{guardianId} {
+        allow read: if seesAllStudents() || (isMember(sid) && resource.data.uid == request.auth.uid);
+        allow write: if false;
+      }
+      match /enrolments/{enrolmentId} {
+        allow read: if seesAllStudents() || teachesArm(resource.data.armId);
+        allow write: if false;
+      }
+    }
+
+    // Platform admins can read the installation record (data version).
+    match /platform/config {
+      allow read: if platformAdmin();
+      allow write: if false;
     }
 
     // Everything else (login codes, slugs, platform config) is server-only.

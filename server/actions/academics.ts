@@ -4,6 +4,7 @@
 import { FieldValue, type Transaction } from "firebase-admin/firestore";
 import { z } from "zod";
 import { audit, col, db, fail, getOrFail, nameKey, now, parse, requireRole, schoolRef, ADMIN_ROLES, TEACHING_ROLES, type Ctx, type Role } from "../core.js";
+import { armTeachers, recomputeArmTeachers, syncStudentsToSession } from "../sync.js";
 import { SECTION_BASE, SECTIONS, TEMPLATE_LEVELS, TEMPLATE_SUBJECTS, type Section } from "../template.js";
 
 const id = z.string().min(1).max(128);
@@ -155,7 +156,7 @@ export async function termsDelete(input: unknown, ctx: Ctx | null) {
 export async function setCurrentTerm(input: unknown, ctx: Ctx | null) {
   const v = parse(z.object({ schoolId: id, termId: id }), input);
   const c = await admin(ctx, v.schoolId);
-  return db().runTransaction(async (tx) => {
+  const result = await db().runTransaction(async (tx) => {
     const term = await getOrFail<{ sessionId: string }>(col(v.schoolId, "terms").doc(v.termId), "Term", tx);
     const school = (await tx.get(schoolRef(v.schoolId))).data() ?? {};
     tx.update(schoolRef(v.schoolId), { currentTermId: v.termId, currentSessionId: term.sessionId, updatedAt: now() });
@@ -166,8 +167,14 @@ export async function setCurrentTerm(input: unknown, ctx: Ctx | null) {
       before: { currentTermId: school.currentTermId ?? null, currentSessionId: school.currentSessionId ?? null },
       after: { currentTermId: v.termId, currentSessionId: term.sessionId },
     });
-    return { ok: true };
+    return { sessionChanged: school.currentSessionId !== term.sessionId, sessionId: term.sessionId };
   });
+  // A new session means new class lists and new teacher assignments.
+  if (result.sessionChanged) {
+    await syncStudentsToSession(v.schoolId, result.sessionId);
+    await recomputeArmTeachers(v.schoolId);
+  }
+  return { ok: true };
 }
 
 // ------------------------------------------------------------------ class levels
@@ -285,7 +292,7 @@ export async function armsCreate(input: unknown, ctx: Ctx | null) {
     await checkArm(tx, v.schoolId, v.levelId, v);
     const ref = col(v.schoolId, "classArms").doc();
     const data = { levelId: v.levelId, name: v.name, nameKey: nameKey(v.name), formTutorId: v.formTutorId || null, capacity: v.capacity ?? null };
-    tx.set(ref, { ...data, createdAt: now(), updatedAt: now() });
+    tx.set(ref, { ...data, teacherIds: armTeachers(data.formTutorId, []), createdAt: now(), updatedAt: now() });
     audit(tx, v.schoolId, c, { action: "create", entity: "classArm", entityId: ref.id, after: data });
     return { id: ref.id };
   });
@@ -298,8 +305,11 @@ export async function armsUpdate(input: unknown, ctx: Ctx | null) {
     const ref = col(v.schoolId, "classArms").doc(v.id);
     const before = await getOrFail<{ levelId: string }>(ref, "Class arm", tx);
     await checkArm(tx, v.schoolId, before.levelId, v, v.id);
+    const sessionId = (await tx.get(schoolRef(v.schoolId))).data()?.currentSessionId as string | undefined;
+    const assigned = await tx.get(col(v.schoolId, "assignments").where("armId", "==", v.id));
+    const teachers = assigned.docs.filter((a) => a.data().sessionId === sessionId).map((a) => a.data().teacherId as string);
     const data = { name: v.name, nameKey: nameKey(v.name), formTutorId: v.formTutorId || null, capacity: v.capacity ?? null };
-    tx.update(ref, { ...data, updatedAt: now() });
+    tx.update(ref, { ...data, teacherIds: armTeachers(data.formTutorId, teachers), updatedAt: now() });
     audit(tx, v.schoolId, c, { action: "update", entity: "classArm", entityId: v.id, before, after: { ...before, ...data } });
     return { ok: true };
   });
@@ -313,6 +323,8 @@ export async function armsDelete(input: unknown, ctx: Ctx | null) {
     const before = await getOrFail(ref, "Class arm", tx);
     const assigned = await tx.get(col(v.schoolId, "assignments").where("armId", "==", v.id).limit(1));
     if (!assigned.empty) fail(409, "Teachers are assigned to this arm. Remove those assignments first.");
+    const enrolled = await tx.get(col(v.schoolId, "enrolments").where("armId", "==", v.id).limit(1));
+    if (!enrolled.empty) fail(409, "Students are (or were) in this arm, so it cannot be deleted.");
     tx.delete(ref);
     audit(tx, v.schoolId, c, { action: "delete", entity: "classArm", entityId: v.id, before });
     return { ok: true };
@@ -388,7 +400,7 @@ export async function assignmentsSet(input: unknown, ctx: Ctx | null) {
     const school = (await tx.get(schoolRef(v.schoolId))).data();
     const sessionId = school?.currentSessionId as string | undefined;
     if (!sessionId) fail(400, "Set the current term first (Sessions & terms).");
-    const arm = await getOrFail<{ levelId: string }>(col(v.schoolId, "classArms").doc(v.armId), "Class arm", tx);
+    const arm = await getOrFail<{ levelId: string; formTutorId?: string | null }>(col(v.schoolId, "classArms").doc(v.armId), "Class arm", tx);
     const level = await getOrFail<{ subjects?: Record<string, string> }>(col(v.schoolId, "classLevels").doc(arm.levelId), "Class", tx);
     if (!level.subjects?.[v.subjectId]) fail(400, "This subject is not offered in this class. Add it under Subjects first.");
     if (v.teacherId && !(await isTeachingStaff(tx, v.schoolId, v.teacherId))) fail(400, "The teacher must be a teacher at this school.");
@@ -396,6 +408,10 @@ export async function assignmentsSet(input: unknown, ctx: Ctx | null) {
     const ref = col(v.schoolId, "assignments").doc(`${sessionId}__${v.armId}__${v.subjectId}`);
     const existing = await tx.get(ref);
     const before = existing.exists ? existing.data() : null;
+    // Keep the arm's teacher list (used by the security rules) in step.
+    const armAssigned = await tx.get(col(v.schoolId, "assignments").where("armId", "==", v.armId));
+    const others = armAssigned.docs.filter((a) => a.id !== ref.id && a.data().sessionId === sessionId).map((a) => a.data().teacherId as string);
+    tx.update(col(v.schoolId, "classArms").doc(v.armId), { teacherIds: armTeachers(arm.formTutorId, v.teacherId ? [...others, v.teacherId] : others) });
     if (!v.teacherId) {
       if (existing.exists) {
         tx.delete(ref);

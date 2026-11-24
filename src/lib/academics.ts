@@ -37,7 +37,7 @@ export type Term = {
 };
 export type AcademicSession = { id: string; name: string; start_date: string; end_date: string; is_current: boolean; terms: Term[] };
 
-export type ClassArm = { id: string; class_level_id: string; name: string; form_tutor_id: string | null; capacity: number | null };
+export type ClassArm = { id: string; class_level_id: string; name: string; form_tutor_id: string | null; capacity: number | null; teacher_ids: string[] };
 export type ClassLevel = { id: string; name: string; section: Section; order_index: number; class_arms: ClassArm[] };
 export type Subject = { id: string; name: string; short_code: string; category: SubjectCategory };
 export type ClassSubject = { id: string; class_level_id: string; subject_id: string; is_compulsory: boolean };
@@ -86,7 +86,7 @@ export async function loadLevels(schoolId: string): Promise<ClassLevel[]> {
   const [levels, arms] = await Promise.all([getDocs(scol(schoolId, "classLevels")), getDocs(scol(schoolId, "classArms"))]);
   const allArms: ClassArm[] = arms.docs.map((a) => {
     const d = a.data();
-    return { id: a.id, class_level_id: d.levelId, name: d.name, form_tutor_id: d.formTutorId ?? null, capacity: d.capacity ?? null };
+    return { id: a.id, class_level_id: d.levelId, name: d.name, form_tutor_id: d.formTutorId ?? null, capacity: d.capacity ?? null, teacher_ids: (d.teacherIds ?? []) as string[] };
   });
   return levels.docs
     .map((l) => {

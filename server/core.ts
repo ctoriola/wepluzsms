@@ -169,6 +169,8 @@ export function normalizePhone(input: string | null | undefined): string | null 
   if (trimmed.startsWith("+")) e164 = `+${digits}`;
   else if (digits.startsWith("234")) e164 = `+${digits}`;
   else if (digits.startsWith("0") && digits.length === 11) e164 = `+234${digits.slice(1)}`;
+  // Spreadsheets drop the leading 0: 8031234567 is a Nigerian mobile number.
+  else if (digits.length === 10 && /^[789][01]/.test(digits)) e164 = `+234${digits}`;
   else e164 = `+${digits}`;
   return /^\+[1-9][0-9]{7,14}$/.test(e164) ? e164 : null;
 }

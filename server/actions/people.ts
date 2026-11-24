@@ -146,6 +146,52 @@ async function loadManageable(tx: Transaction, ctx: Ctx, actorRoles: Role[], sid
   return { ref, member };
 }
 
+/**
+ * Find or create a login account (by email, else phone) and give it a role in
+ * the school. Used by staff invites and by parent logins for guardians.
+ * The caller must already have checked that the actor may grant `role`.
+ */
+export async function ensureAccountWithRole(
+  sid: string,
+  person: { fullName: string; email: string | null; phone: string | null },
+  role: Role,
+  c: Ctx | null,
+): Promise<{ uid: string; created: boolean }> {
+  let user = await (person.email ? adminAuth().getUserByEmail(person.email) : adminAuth().getUserByPhoneNumber(person.phone!)).catch(() => null);
+  let created = false;
+  if (!user) {
+    user = await adminAuth().createUser(
+      person.email
+        ? { email: person.email, displayName: person.fullName, password: randomBytes(24).toString("base64url"), ...(person.phone ? { phoneNumber: person.phone } : {}) }
+        : { phoneNumber: person.phone!, displayName: person.fullName },
+    );
+    created = true;
+  }
+  if (c && user.uid === c.uid) fail(400, "You cannot change your own access.");
+  const uid = user.uid;
+
+  await db().runTransaction(async (tx) => {
+    const ref = col(sid, "members").doc(uid);
+    const userRef = db().collection("users").doc(uid);
+    const [existing, profile] = await Promise.all([tx.get(ref), tx.get(userRef)]);
+    const before = existing.exists ? (existing.data() as MemberDoc) : null;
+    const fullName = (profile.data()?.fullName as string | undefined) || before?.fullName || person.fullName;
+    const member: MemberDoc = {
+      uid,
+      fullName,
+      email: user!.email ?? null,
+      phone: user!.phoneNumber ?? null,
+      roles: [...new Set([...(before?.roles ?? []), role])],
+      status: "active",
+    };
+    tx.set(ref, { ...member, invitedBy: c?.uid ?? null, updatedAt: now(), ...(before ? {} : { createdAt: now() }) }, { merge: true });
+    if (!profile.exists) tx.set(userRef, { fullName, email: member.email, phone: member.phone, activeSchoolId: sid, createdAt: now() }, { merge: true });
+    syncUserMembership(tx, uid, sid, member);
+    audit(tx, sid, c, { action: before ? "update" : "create", entity: "member", entityId: uid, before, after: member });
+  });
+  return { uid, created };
+}
+
 export async function membersInvite(input: unknown, ctx: Ctx | null) {
   const v = parse(
     z.object({
@@ -163,40 +209,7 @@ export async function membersInvite(input: unknown, ctx: Ctx | null) {
   if (v.phone && !phone) fail(400, "Enter a valid phone number, e.g. 0803 123 4567.");
   if (!v.email && !phone) fail(400, "Enter an email address or a phone number.");
 
-  // Find or create the login account.
-  let user = await (v.email ? adminAuth().getUserByEmail(v.email) : adminAuth().getUserByPhoneNumber(phone!)).catch(() => null);
-  let created = false;
-  if (!user) {
-    user = await adminAuth().createUser(
-      v.email
-        ? { email: v.email, displayName: v.fullName, password: randomBytes(24).toString("base64url"), ...(phone ? { phoneNumber: phone } : {}) }
-        : { phoneNumber: phone!, displayName: v.fullName },
-    );
-    created = true;
-  }
-  if (user.uid === c.uid) fail(400, "You cannot change your own access.");
-  const uid = user.uid;
-
-  await db().runTransaction(async (tx) => {
-    const ref = col(v.schoolId, "members").doc(uid);
-    const userRef = db().collection("users").doc(uid);
-    const [existing, profile] = await Promise.all([tx.get(ref), tx.get(userRef)]);
-    const before = existing.exists ? (existing.data() as MemberDoc) : null;
-    const fullName = (profile.data()?.fullName as string | undefined) || before?.fullName || v.fullName;
-    const member: MemberDoc = {
-      uid,
-      fullName,
-      email: user!.email ?? null,
-      phone: user!.phoneNumber ?? null,
-      roles: [...new Set([...(before?.roles ?? []), v.role])],
-      status: "active",
-    };
-    tx.set(ref, { ...member, invitedBy: c.uid, updatedAt: now(), ...(before ? {} : { createdAt: now() }) }, { merge: true });
-    if (!profile.exists) tx.set(userRef, { fullName, email: member.email, phone: member.phone, activeSchoolId: v.schoolId, createdAt: now() }, { merge: true });
-    syncUserMembership(tx, uid, v.schoolId, member);
-    audit(tx, v.schoolId, c, { action: before ? "update" : "create", entity: "member", entityId: uid, before, after: member });
-  });
-
+  const { uid, created } = await ensureAccountWithRole(v.schoolId, { fullName: v.fullName, email: v.email ?? null, phone }, v.role, c);
   return { uid, created, sendPasswordEmail: created && Boolean(v.email) };
 }
 

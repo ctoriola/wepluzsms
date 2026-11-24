@@ -46,12 +46,13 @@ function SetupChecklist({ schoolId, sessionId }: { schoolId: string; sessionId: 
   const { data } = useAsync(async () => {
     const count = async (name: string, ...filters: ReturnType<typeof where>[]) =>
       (await getCountFromServer(query(collection(db, "schools", schoolId, name), ...filters))).data().count;
-    const [school, members, levels, arms, assignments] = await Promise.all([
+    const [school, members, levels, arms, assignments, students] = await Promise.all([
       getDoc(doc(db, "schools", schoolId)),
       getDocs(collection(db, "schools", schoolId, "members")),
       getDocs(collection(db, "schools", schoolId, "classLevels")),
       count("classArms"),
       sessionId ? count("assignments", where("sessionId", "==", sessionId)) : Promise.resolve(0),
+      count("students"),
     ]);
     const s = school.data()?.settings ?? {};
     const roles = members.docs.flatMap((m) => (m.data().roles ?? []) as string[]);
@@ -64,6 +65,7 @@ function SetupChecklist({ schoolId, sessionId }: { schoolId: string; sessionId: 
       { done: arms > 0, label: "Create classes and arms", to: "/academics/classes" },
       { done: offerings, label: "Choose the subjects each class offers", to: "/academics/subjects" },
       { done: assignments > 0, label: "Assign subject teachers", to: "/academics/teachers" },
+      { done: students > 0, label: "Add your students (or import from Excel)", to: "/students" },
     ];
   }, [schoolId, sessionId, activeSchool?.logo]);
 
@@ -156,7 +158,7 @@ export function DashboardPage() {
         <section className="card p-5">
           <h2 className="font-semibold">What's coming next</h2>
           <p className="mt-2 text-sm text-slate-600">
-            Student records, attendance, results and fees are being added step by step. Menu items marked
+            Attendance, results and fees are being added step by step. Menu items marked
             <span className="mx-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-600">Soon</span>
             will switch on as each one is ready.
           </p>

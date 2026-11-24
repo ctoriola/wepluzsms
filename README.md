@@ -33,7 +33,7 @@ server/
   template.ts         Nigerian class and subject starter template
 firestore.rules       who can READ what (all writes go through the server)
 src/                  React web app (Vite + TypeScript + Tailwind)
-tests/server/         47 tests against the Firebase emulators (rules + every action)
+tests/server/         70 tests against the Firebase emulators (rules + every action)
 scripts/sync-rules.mjs  publishes the rules on each Vercel build
 ```
 
@@ -42,6 +42,17 @@ scripts/sync-rules.mjs  publishes the rules on each Vercel build
 - **One function**: all actions share one Vercel Function, keeping well under the Hobby plan's limit of 12.
 - **Logos** are resized in the browser and stored in Firestore, because Firebase Storage now needs the paid Blaze plan.
 - **Parent SMS login** uses Termii: the server sends a 6-digit code and signs the parent in with a Firebase custom token. This works on the free Spark plan (Firebase's own phone sign-in needs Blaze). Until Termii keys are set, the app says so and parents can use email.
+
+## Updating an existing site
+
+Some releases need a one-off data update (for example WS2 adds teacher class lists that the security rules use). After Vercel deploys a new version, sign in as a platform admin and open **Platform > Schools**. If a banner says a new version was deployed, click **Run data updates**. It is safe to run more than once.
+
+## Who sees which students
+
+- Proprietor, principal, school admin and bursar: every student.
+- Teachers: only students in arms where they are the form tutor or teach a subject this session.
+- Parents: only their own children (once the school gives them a parent login).
+- Medical details: leadership and the child's own parents only. Teachers see a "medical alert" flag.
 
 ## Roles
 
@@ -53,7 +64,8 @@ proprietor, principal, school_admin, bursar, teacher, parent. One person can hol
 |---|---|---|
 | WS0 | Schools, sign-in (staff email, parent SMS code), roles, invites, school profile and logo, audit log, one-click setup | Done |
 | WS1 | Sessions and terms, current term, classes and arms, form tutors, subjects grid, teacher assignments, Nigerian template, teacher "My classes" | Done |
-| WS2 | Student records | Next |
+| WS2 | Student records: profiles, photos, medical (private), guardians and parent logins, admission numbers, change class, withdraw/reinstate, Excel/CSV import, end-of-session promotion, parent "My children" | Done |
+| WS3 | Attendance | Next |
 
 ## Local development
 
@@ -79,4 +91,4 @@ npm test
 ```bash
 npm run test:server
 ```
-The second command starts throwaway Firebase emulators and runs the 47 rules and API tests: tenant isolation, every role's permissions, all school rules, audit entries, and the SMS login flow.
+The second command starts throwaway Firebase emulators and runs the 70 rules and API tests: tenant isolation, every role's permissions, all school rules, audit entries, and the SMS login flow.

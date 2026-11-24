@@ -41,7 +41,7 @@ export const NAV: NavSection[] = [
   {
     title: "Academics",
     items: [
-      { label: "Students", to: "/students", icon: Users, roles: STAFF_ROLES, comingIn: "WS2" },
+      { label: "Students", to: "/students", icon: Users, roles: STAFF_ROLES, needsSchool: true },
       { label: "Attendance", to: "/attendance", icon: CalendarCheck, roles: TEACHING, comingIn: "WS3" },
       { label: "Results", to: "/results", icon: GraduationCap, roles: TEACHING, comingIn: "WS4" },
     ],
@@ -66,7 +66,7 @@ export const NAV: NavSection[] = [
   {
     title: "My children",
     items: [
-      { label: "Children", to: "/parent/children", icon: HeartHandshake, roles: ["parent"], comingIn: "WS7" },
+      { label: "Children", to: "/parent/children", icon: HeartHandshake, roles: ["parent"] },
       { label: "Fees & receipts", to: "/parent/fees", icon: Receipt, roles: ["parent"], comingIn: "WS7" },
     ],
   },

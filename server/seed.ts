@@ -4,6 +4,8 @@
 import { applyTemplateTo } from "./actions/academics.js";
 import { createSchoolDoc, DEFAULT_SETTINGS } from "./actions/people.js";
 import { adminAuth, col, db, nameKey, now, schoolRef, type Role } from "./core.js";
+import { seedDemoStudents } from "./seedStudents.js";
+import { recomputeArmTeachers } from "./sync.js";
 
 export const DEMO_PASSWORD = "Password123!";
 export const DEMO = { academy: "demo-academy", greenfield: "greenfield-college" } as const;
@@ -125,5 +127,8 @@ export async function seedDemo() {
     });
   }
   await batch.commit();
+  await seedDemoStudents();
+  await recomputeArmTeachers(DEMO.academy);
+  await recomputeArmTeachers(DEMO.greenfield);
   return { ok: true };
 }

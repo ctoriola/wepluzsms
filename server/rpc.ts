@@ -3,7 +3,8 @@
 import * as academics from "./actions/academics.js";
 import * as people from "./actions/people.js";
 import { brandingGet, otpRequest, otpVerify, termiiSend, type Deps } from "./actions/public.js";
-import { setupInstall, setupStatus, setupSyncRules } from "./actions/setup.js";
+import { setupInstall, setupStatus, setupSyncRules, setupUpgrade } from "./actions/setup.js";
+import * as students from "./actions/students.js";
 import { authenticate, HttpError, type Ctx } from "./core.js";
 
 type Handler = (input: unknown, ctx: Ctx | null, deps: Deps) => Promise<unknown>;
@@ -17,6 +18,7 @@ export const ACTIONS: Record<string, Handler> = {
   "otp.verify": (i) => otpVerify(i),
   // platform
   "setup.syncRules": setupSyncRules,
+  "setup.upgrade": setupUpgrade,
   "schools.create": people.schoolsCreate,
   // school + people
   "schools.update": people.schoolsUpdate,
@@ -48,6 +50,21 @@ export const ACTIONS: Record<string, Handler> = {
   "subjects.delete": academics.subjectsDelete,
   "assignments.set": academics.assignmentsSet,
   "template.apply": academics.applyTemplate,
+  // students (WS2)
+  "students.create": students.studentsCreate,
+  "students.update": students.studentsUpdate,
+  "students.setPhoto": students.studentsSetPhoto,
+  "students.setMedical": students.studentsSetMedical,
+  "students.changeArm": students.studentsChangeArm,
+  "students.withdraw": students.studentsWithdraw,
+  "students.reinstate": students.studentsReinstate,
+  "students.import": students.studentsImport,
+  "guardians.add": students.guardiansAdd,
+  "guardians.update": students.guardiansUpdate,
+  "guardians.setLink": students.guardiansSetLink,
+  "guardians.unlink": students.guardiansUnlink,
+  "guardians.enableLogin": students.guardiansEnableLogin,
+  "promotion.run": students.promotionRun,
 };
 
 export const defaultDeps: Deps = { sendSms: termiiSend };

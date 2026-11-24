@@ -7,13 +7,27 @@ import path from "node:path";
 import { getSecurityRules } from "firebase-admin/security-rules";
 import { z } from "zod";
 import { adminApp, adminAuth, db, fail, now, parse, requirePlatformAdmin, usingEmulators, type Ctx } from "../core.js";
-import { seedDemo } from "../seed.js";
+import { DEMO, seedDemo } from "../seed.js";
+import { seedDemoStudents } from "../seedStudents.js";
+import { recomputeArmTeachers } from "../sync.js";
+
+/**
+ * Bump when existing installations need a data update after a new release.
+ * 1: WS0 + WS1.  2: WS2 (class arm teacher lists; demo students).
+ */
+export const DATA_VERSION = 2;
 
 const configRef = () => db().collection("platform").doc("config");
 
 export async function setupStatus() {
   const cfg = await configRef().get();
-  return { installed: cfg.exists, mode: (cfg.data()?.mode as string | undefined) ?? null, configured: Boolean(process.env.SETUP_TOKEN) };
+  return {
+    installed: cfg.exists,
+    mode: (cfg.data()?.mode as string | undefined) ?? null,
+    configured: Boolean(process.env.SETUP_TOKEN),
+    dataVersion: cfg.exists ? ((cfg.data()?.dataVersion as number | undefined) ?? 1) : null,
+    latestDataVersion: DATA_VERSION,
+  };
 }
 
 function checkToken(given: string) {
@@ -63,8 +77,32 @@ export async function setupInstall(input: unknown) {
     await adminAuth().setCustomUserClaims(user.uid, { platformAdmin: true });
     await db().collection("users").doc(user.uid).set({ fullName: v.fullName, email: v.email, phone: null, memberships: {}, createdAt: now() });
   }
-  await configRef().set({ installedAt: now(), mode: v.mode });
+  await configRef().set({ installedAt: now(), mode: v.mode, dataVersion: DATA_VERSION });
   return { ok: true, rules };
+}
+
+/** Bring an existing installation's data up to date after a release. Safe to run more than once. */
+export async function setupUpgrade(_input: unknown, ctx: Ctx | null) {
+  requirePlatformAdmin(ctx);
+  const cfg = await configRef().get();
+  if (!cfg.exists) fail(400, "Wepluz is not installed yet. Use /setup first.");
+  const from = (cfg.data()?.dataVersion as number | undefined) ?? 1;
+  const done: string[] = [];
+  if (from < 2) {
+    const schools = await db().collection("schools").get();
+    let arms = 0;
+    for (const s of schools.docs) arms += await recomputeArmTeachers(s.id);
+    done.push(`Updated teacher lists on ${arms} class arms.`);
+    if (cfg.data()?.mode === "demo") {
+      const existing = await db().collection("schools").doc(DEMO.academy).collection("students").limit(1).get();
+      if (existing.empty && (await db().collection("schools").doc(DEMO.academy).get()).exists) {
+        const r = await seedDemoStudents();
+        done.push(`Added ${r.students} demo students.`);
+      }
+    }
+  }
+  await configRef().set({ dataVersion: DATA_VERSION, upgradedAt: now() }, { merge: true });
+  return { from, to: DATA_VERSION, done };
 }
 
 /** Platform admins can re-publish the rules any time (also done on every Vercel build). */

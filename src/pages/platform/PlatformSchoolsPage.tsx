@@ -25,6 +25,24 @@ export function PlatformSchoolsPage() {
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [upgrading, setUpgrading] = useState(false);
+  const status = useAsync(() => api<{ dataVersion: number | null; latestDataVersion: number }>("setup.status"), []);
+  const needsUpgrade = Boolean(status.data?.dataVersion && status.data.dataVersion < status.data.latestDataVersion);
+
+  async function upgrade() {
+    setUpgrading(true);
+    setMessage(null);
+    try {
+      const r = await api<{ done: string[] }>("setup.upgrade");
+      setMessage({ tone: "success", text: r.done.length ? `Data updated. ${r.done.join(" ")}` : "Everything is already up to date." });
+      await status.reload();
+      await refresh();
+    } catch (err) {
+      setMessage({ tone: "error", text: friendlyError(err) });
+    } finally {
+      setUpgrading(false);
+    }
+  }
 
   async function create(e: FormEvent) {
     e.preventDefault();
@@ -71,6 +89,14 @@ export function PlatformSchoolsPage() {
           </>
         }
       />
+      {needsUpgrade && (
+        <div className="card mb-4 flex flex-col gap-3 border-amber-200 bg-amber-50 p-4 sm:flex-row sm:items-center">
+          <p className="flex-1 text-sm text-amber-900">
+            A new version of Wepluz was deployed. Run the data update once so existing schools get the new features (e.g. teacher class lists for student records).
+          </p>
+          <Button loading={upgrading} onClick={() => void upgrade()}>Run data updates</Button>
+        </div>
+      )}
       {schools.error && <div className="mb-4"><Alert>{schools.error}</Alert></div>}
       {message && <div className="mb-4"><Alert tone={message.tone}>{message.text}</Alert></div>}
       <div className="card divide-y divide-slate-100">
