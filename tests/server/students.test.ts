@@ -302,7 +302,7 @@ describe("data upgrade for existing installs", () => {
     expect(out.done.join(" ")).toMatch(/demo students/);
     expect((await sch().collection("classArms").doc(await armId("JSS 1 A")).get()).data()?.teacherIds).toContain("demo-teacher1");
     expect((await sch().collection("students").count().get()).data().count).toBeGreaterThan(100);
-    expect((await call(null, "setup.status")).dataVersion).toBe(2);
+    expect((await call(null, "setup.status")).dataVersion).toBe(3);
     expect((await call(P.platform, "setup.upgrade")).done).toEqual([]);
   });
 });

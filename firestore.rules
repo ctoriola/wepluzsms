@@ -140,6 +140,14 @@ service cloud.firestore {
         allow read: if seesAllStudents() || teachesArm(resource.data.armId);
         allow write: if false;
       }
+      // Daily registers (one per class per day). Parents use the server summary instead,
+      // so they never see other children's marks.
+      // The id is "<armId>__<date>", so a teacher can also check a register
+      // that has not been taken yet (the document does not exist).
+      match /attendance/{registerId} {
+        allow read: if seesAllStudents() || teachesArm(registerId.split('__')[0]);
+        allow write: if false;
+      }
     }
 
     // Platform admins can read the installation record (data version).

@@ -2,6 +2,7 @@
 // all (the free Hobby plan allows at most 12 functions).
 import * as academics from "./actions/academics.js";
 import * as people from "./actions/people.js";
+import { attendanceSave, attendanceSetHoliday, attendanceStudentSummary, lagosToday } from "./actions/attendance.js";
 import { brandingGet, otpRequest, otpVerify, termiiSend, type Deps } from "./actions/public.js";
 import { setupInstall, setupStatus, setupSyncRules, setupUpgrade } from "./actions/setup.js";
 import * as students from "./actions/students.js";
@@ -65,9 +66,13 @@ export const ACTIONS: Record<string, Handler> = {
   "guardians.unlink": students.guardiansUnlink,
   "guardians.enableLogin": students.guardiansEnableLogin,
   "promotion.run": students.promotionRun,
+  // attendance (WS3)
+  "attendance.save": attendanceSave,
+  "attendance.setHoliday": attendanceSetHoliday,
+  "attendance.studentSummary": attendanceStudentSummary,
 };
 
-export const defaultDeps: Deps = { sendSms: termiiSend };
+export const defaultDeps: Deps = { sendSms: termiiSend, today: lagosToday };
 
 export async function dispatch(action: unknown, payload: unknown, authHeader: string | undefined, deps: Deps = defaultDeps) {
   if (typeof action !== "string" || !Object.prototype.hasOwnProperty.call(ACTIONS, action)) throw new HttpError(404, "Unknown action.");

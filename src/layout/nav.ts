@@ -42,7 +42,7 @@ export const NAV: NavSection[] = [
     title: "Academics",
     items: [
       { label: "Students", to: "/students", icon: Users, roles: STAFF_ROLES, needsSchool: true },
-      { label: "Attendance", to: "/attendance", icon: CalendarCheck, roles: TEACHING, comingIn: "WS3" },
+      { label: "Attendance", to: "/attendance", icon: CalendarCheck, roles: [...TEACHING, "bursar"], needsSchool: true },
       { label: "Results", to: "/results", icon: GraduationCap, roles: TEACHING, comingIn: "WS4" },
     ],
   },

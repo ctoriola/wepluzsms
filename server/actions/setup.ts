@@ -8,14 +8,15 @@ import { getSecurityRules } from "firebase-admin/security-rules";
 import { z } from "zod";
 import { adminApp, adminAuth, db, fail, now, parse, requirePlatformAdmin, usingEmulators, type Ctx } from "../core.js";
 import { DEMO, seedDemo } from "../seed.js";
+import { seedDemoAttendance } from "../seedAttendance.js";
 import { seedDemoStudents } from "../seedStudents.js";
 import { recomputeArmTeachers } from "../sync.js";
 
 /**
  * Bump when existing installations need a data update after a new release.
- * 1: WS0 + WS1.  2: WS2 (class arm teacher lists; demo students).
+ * 1: WS0 + WS1.  2: WS2 (class arm teacher lists; demo students).  3: WS3 (demo attendance).
  */
-export const DATA_VERSION = 2;
+export const DATA_VERSION = 3;
 
 const configRef = () => db().collection("platform").doc("config");
 
@@ -100,6 +101,10 @@ export async function setupUpgrade(_input: unknown, ctx: Ctx | null) {
         done.push(`Added ${r.students} demo students.`);
       }
     }
+  }
+  if (from < 3 && cfg.data()?.mode === "demo" && (await db().collection("schools").doc(DEMO.academy).get()).exists) {
+    const r = await seedDemoAttendance();
+    if (r.registers) done.push(`Added ${r.registers} demo class registers.`);
   }
   await configRef().set({ dataVersion: DATA_VERSION, upgradedAt: now() }, { merge: true });
   return { from, to: DATA_VERSION, done };

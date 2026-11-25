@@ -5,7 +5,7 @@ import { Timestamp } from "firebase-admin/firestore";
 import { z } from "zod";
 import { adminAuth, db, fail, normalizePhone, parse } from "../core.js";
 
-export type Deps = { sendSms: (phone: string, message: string) => Promise<void> };
+export type Deps = { sendSms: (phone: string, message: string) => Promise<void>; today: () => string };
 
 export async function brandingGet(input: unknown) {
   const v = parse(z.object({ slug: z.string().trim().toLowerCase().max(60) }), input);

@@ -7,6 +7,8 @@ import { CalendarPage } from "@/pages/academics/CalendarPage";
 import { ClassesPage } from "@/pages/academics/ClassesPage";
 import { SubjectsPage } from "@/pages/academics/SubjectsPage";
 import { TeacherAssignmentsPage } from "@/pages/academics/TeacherAssignmentsPage";
+import { AttendancePage } from "@/pages/attendance/AttendancePage";
+import { RegisterPage } from "@/pages/attendance/RegisterPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { ChildrenPage } from "@/pages/parent/ChildrenPage";
 import { ImportStudentsPage } from "@/pages/students/ImportStudentsPage";
@@ -53,6 +55,8 @@ export default function App() {
           >
             <Route index element={<DashboardPage />} />
             <Route path="platform/schools" element={<PlatformOnly><PlatformSchoolsPage /></PlatformOnly>} />
+            <Route path="attendance" element={<RequireRole roles={[...STAFF_ROLES]}><AttendancePage /></RequireRole>} />
+            <Route path="attendance/:armId/:date" element={<RequireRole roles={[...STAFF_ROLES]}><RegisterPage /></RequireRole>} />
             <Route path="students" element={<RequireRole roles={STAFF_ROLES}><StudentsPage /></RequireRole>} />
             <Route path="students/import" element={<RequireRole roles={ADMIN_ROLES}><ImportStudentsPage /></RequireRole>} />
             <Route path="students/promotion" element={<RequireRole roles={ADMIN_ROLES}><PromotionPage /></RequireRole>} />

@@ -11,7 +11,9 @@ export const ACADEMY = "demo-academy";
 export const GREENFIELD = "greenfield-college";
 
 export const sentSms: { phone: string; message: string }[] = [];
-const deps = { sendSms: async (phone: string, message: string) => void sentSms.push({ phone, message }) };
+/** Tests run on a fixed school day (Wednesday in the demo First Term). */
+export const TODAY = "2026-11-25";
+const deps = { sendSms: async (phone: string, message: string) => void sentSms.push({ phone, message }), today: () => TODAY };
 
 export async function resetEmulators() {
   await fetch(`${FS}/emulator/v1/projects/${PROJECT}/databases/(default)/documents`, { method: "DELETE" });

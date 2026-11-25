@@ -33,7 +33,7 @@ server/
   template.ts         Nigerian class and subject starter template
 firestore.rules       who can READ what (all writes go through the server)
 src/                  React web app (Vite + TypeScript + Tailwind)
-tests/server/         70 tests against the Firebase emulators (rules + every action)
+tests/server/         80 tests against the Firebase emulators (rules + every action)
 scripts/sync-rules.mjs  publishes the rules on each Vercel build
 ```
 
@@ -65,7 +65,8 @@ proprietor, principal, school_admin, bursar, teacher, parent. One person can hol
 | WS0 | Schools, sign-in (staff email, parent SMS code), roles, invites, school profile and logo, audit log, one-click setup | Done |
 | WS1 | Sessions and terms, current term, classes and arms, form tutors, subjects grid, teacher assignments, Nigerian template, teacher "My classes" | Done |
 | WS2 | Student records: profiles, photos, medical (private), guardians and parent logins, admission numbers, change class, withdraw/reinstate, Excel/CSV import, end-of-session promotion, parent "My children" | Done |
-| WS3 | Attendance | Next |
+| WS3 | Attendance: phone-friendly daily register (works offline), form tutor today / admin any day, holidays, day overview, student attendance tab for staff and parents, absences queued for parent alerts | Done |
+| WS4 | Results and report cards | Next |
 
 ## Local development
 
@@ -91,4 +92,4 @@ npm test
 ```bash
 npm run test:server
 ```
-The second command starts throwaway Firebase emulators and runs the 70 rules and API tests: tenant isolation, every role's permissions, all school rules, audit entries, and the SMS login flow.
+The second command starts throwaway Firebase emulators and runs the 80 rules and API tests: tenant isolation, every role's permissions, all school rules, audit entries, and the SMS login flow.

@@ -4,6 +4,7 @@
 import { applyTemplateTo } from "./actions/academics.js";
 import { createSchoolDoc, DEFAULT_SETTINGS } from "./actions/people.js";
 import { adminAuth, col, db, nameKey, now, schoolRef, type Role } from "./core.js";
+import { seedDemoAttendance } from "./seedAttendance.js";
 import { seedDemoStudents } from "./seedStudents.js";
 import { recomputeArmTeachers } from "./sync.js";
 
@@ -130,5 +131,6 @@ export async function seedDemo() {
   await seedDemoStudents();
   await recomputeArmTeachers(DEMO.academy);
   await recomputeArmTeachers(DEMO.greenfield);
+  await seedDemoAttendance();
   return { ok: true };
 }

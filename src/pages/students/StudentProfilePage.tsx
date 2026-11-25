@@ -29,7 +29,37 @@ import {
 } from "@/lib/students";
 import { ArmSelect, armOptions, MedicalFlag, STATUS_TONE, StudentAvatar, type ArmOption } from "./common";
 
-type Tab = "details" | "guardians" | "medical" | "history";
+type Tab = "details" | "attendance" | "guardians" | "medical" | "history";
+
+type Summary = { term: string; daysOpen: number; marked: number; present: number; late: number; absent: number; excused: number; rate: number | null; records: { date: string; status: string }[] };
+
+function AttendanceTab({ sid, studentId }: { sid: string; studentId: string }) {
+  const data = useAsync(() => api<Summary>("attendance.studentSummary", { schoolId: sid, studentId }), [sid, studentId]);
+  if (data.loading) return <p className="text-sm text-slate-500">Loading attendance...</p>;
+  if (data.error) return <Alert>{data.error}</Alert>;
+  const s = data.data!;
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[["Attendance", s.rate === null ? "-" : `${s.rate}%`], ["Present", s.present], ["Absent", s.absent], ["Late", s.late]].map(([k, v]) => (
+          <div key={k as string} className="rounded-lg border border-slate-200 p-3"><p className="text-xl font-bold">{v}</p><p className="text-xs text-slate-500">{k}</p></div>
+        ))}
+      </div>
+      <p className="mt-3 text-xs text-slate-500">{s.term}: {s.marked} of {s.daysOpen} school days so far have a register.{s.excused ? ` ${s.excused} excused.` : ""}</p>
+      <h3 className="mt-4 text-sm font-semibold">Absences and late arrivals</h3>
+      {s.records.length === 0 ? <p className="mt-1 text-sm text-slate-500">None this term.</p> : (
+        <ul className="mt-1 divide-y divide-slate-100 text-sm">
+          {s.records.map((r) => (
+            <li key={r.date} className="flex justify-between py-1.5">
+              <span>{formatDate(r.date, { weekday: "short", day: "numeric", month: "short" })}</span>
+              <Badge tone={r.status === "absent" ? "red" : r.status === "late" ? "amber" : "slate"}>{r.status}</Badge>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
 type Msg = { tone: "success" | "error"; text: string } | null;
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
@@ -389,7 +419,7 @@ export function StudentProfilePage() {
   if (!data.data) return <EmptyState title="Student not found" />;
   const { student: s, arms, photo, guardians, medical, enrolments, sessions, isParent } = data.data;
   const arm = arms.find((a) => a.id === s.currentArmId);
-  const tabs: [Tab, string][] = [["details", "Details"]];
+  const tabs: [Tab, string][] = [["details", "Details"], ["attendance", "Attendance"]];
   if (seesAll || isParent) tabs.push(["guardians", "Parents & guardians"]);
   if (isAdmin || isParent) tabs.push(["medical", "Medical"]);
   if (seesAll) tabs.push(["history", "Class history"]);
@@ -450,7 +480,7 @@ export function StudentProfilePage() {
             {label}
           </button>
         ))}
-        {["Attendance", "Results", "Fees"].map((x) => (
+        {["Results", "Fees"].map((x) => (
           <span key={x} className="flex items-center gap-1 whitespace-nowrap rounded-md px-3 py-1.5 text-sm text-slate-400" title="Coming soon">{x} <span className="text-[10px] uppercase">soon</span></span>
         ))}
       </div>
@@ -469,6 +499,8 @@ export function StudentProfilePage() {
             {s.withdrawal && <Row label="Withdrawn">{`${formatDate(s.withdrawal.date)}: ${s.withdrawal.reason}`}</Row>}
           </dl>
         )}
+
+        {tab === "attendance" && <AttendanceTab sid={sid} studentId={s.id} />}
 
         {tab === "guardians" && (
           <>
