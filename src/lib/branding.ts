@@ -1,5 +1,4 @@
-const DEFAULT_PRIMARY = "#14213D";
-const DEFAULT_ACCENT = "#0F766E";
+const DEFAULT_SCHOOL = "#2E7D69";
 
 function hexToRgbTriplet(hex: string, fallback: string): string {
   const clean = /^#[0-9a-f]{6}$/i.test(hex) ? hex : fallback;
@@ -7,12 +6,10 @@ function hexToRgbTriplet(hex: string, fallback: string): string {
   return `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`;
 }
 
-// Apply a school's colours to the whole app via CSS variables used by Tailwind.
-export function applyBranding(primary?: string | null, accent?: string | null) {
-  const root = document.documentElement;
-  root.style.setProperty("--brand", hexToRgbTriplet(primary ?? DEFAULT_PRIMARY, DEFAULT_PRIMARY));
-  root.style.setProperty("--accent", hexToRgbTriplet(accent ?? DEFAULT_ACCENT, DEFAULT_ACCENT));
-  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", primary ?? DEFAULT_PRIMARY);
+// The app wears the Wepluz design system; a school's own colour shows on its
+// logo badge and login page (and later on report cards).
+export function applyBranding(primary?: string | null, _accent?: string | null) {
+  document.documentElement.style.setProperty("--school", hexToRgbTriplet(primary ?? DEFAULT_SCHOOL, DEFAULT_SCHOOL));
 }
 
 // School slug from subdomain (greenfield.app.example.com) or ?school=greenfield

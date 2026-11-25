@@ -43,6 +43,21 @@ scripts/sync-rules.mjs  publishes the rules on each Vercel build
 - **Logos** are resized in the browser and stored in Firestore, because Firebase Storage now needs the paid Blaze plan.
 - **Parent SMS login** uses Termii: the server sends a 6-digit code and signs the parent in with a Firebase custom token. This works on the free Spark plan (Firebase's own phone sign-in needs Blaze). Until Termii keys are set, the app says so and parents can use email.
 
+## Design system
+
+Mint backdrop, white rounded app frame, curved teal sidebar, soft grey cards, Outfit font.
+
+| Token | Value | Use |
+|---|---|---|
+| `brand` | #2E7D69 teal | sidebar, buttons, icon chips, links, line charts |
+| `accent` | #F5C448 sunflower | logo mark, progress bars, bar charts, avatar chip |
+| `mint` | #DDF3ED | page backdrop |
+| `surface` | #F4F6F8 | cards (`.card`) |
+| `ink` | #171D26 | text |
+| `school` | the school's own colour | school logo fallback only |
+
+Colours live as CSS variables in `src/index.css` and as Tailwind names in `tailwind.config.js`. Shared pieces are in `src/components/ui.tsx` (`Button`, `Badge`, `CardTitle`, `IconChip`, `Modal`) and `src/components/charts.tsx` (`LineChart`, `BarChart`: no chart library, hover tooltips, and a table for screen readers). The dashboard adapts by role: leadership sees school-wide numbers and charts, teachers see their classes and register, parents see their children.
+
 ## Updating an existing site
 
 Some releases need a one-off data update (for example WS2 adds teacher class lists that the security rules use). After Vercel deploys a new version, sign in as a platform admin and open **Platform > Schools**. If a banner says a new version was deployed, click **Run data updates**. It is safe to run more than once.
@@ -66,6 +81,7 @@ proprietor, principal, school_admin, bursar, teacher, parent. One person can hol
 | WS1 | Sessions and terms, current term, classes and arms, form tutors, subjects grid, teacher assignments, Nigerian template, teacher "My classes" | Done |
 | WS2 | Student records: profiles, photos, medical (private), guardians and parent logins, admission numbers, change class, withdraw/reinstate, Excel/CSV import, end-of-session promotion, parent "My children" | Done |
 | WS3 | Attendance: phone-friendly daily register (works offline), form tutor today / admin any day, holidays, day overview, student attendance tab for staff and parents, absences queued for parent alerts | Done |
+| UI | Wepluz design system: new app shell with page and student search, role-based dashboard with attendance trend and class sizes, new sign-in page | Done |
 | WS4 | Results and report cards | Next |
 
 ## Local development

@@ -117,7 +117,7 @@ export function AttendancePage() {
             const canTake = isAdmin || date === today;
             return (
               <div key={a.id} className="flex items-center gap-3 px-4 py-3">
-                <CalendarCheck className={`h-5 w-5 shrink-0 ${r ? "text-accent" : "text-slate-300"}`} aria-hidden />
+                <CalendarCheck className={`h-5 w-5 shrink-0 ${r ? "text-brand" : "text-slate-300"}`} aria-hidden />
                 <div className="min-w-0 flex-1">
                   <p className="font-medium">{a.label}</p>
                   <p className="text-xs text-slate-500">

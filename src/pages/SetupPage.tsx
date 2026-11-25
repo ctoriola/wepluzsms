@@ -36,8 +36,8 @@ export function SetupPage() {
   }
 
   const card = (children: React.ReactNode) => (
-    <div className="flex min-h-full items-center justify-center bg-slate-50 px-4 py-10">
-      <div className="card w-full max-w-lg p-6">{children}</div>
+    <div className="flex min-h-full items-center justify-center bg-mint px-4 py-10">
+      <div className="w-full max-w-lg rounded-[2rem] bg-white p-7 shadow-xl shadow-brand/10">{children}</div>
     </div>
   );
 
@@ -48,7 +48,7 @@ export function SetupPage() {
     const demo = done === "demo" || status.data?.mode === "demo";
     return card(
       <div className="text-center">
-        <CheckCircle2 className="mx-auto h-10 w-10 text-accent" aria-hidden />
+        <CheckCircle2 className="mx-auto h-10 w-10 text-brand" aria-hidden />
         <h1 className="mt-3 text-lg font-bold">{done ? "Wepluz is installed" : "Wepluz is already installed"}</h1>
         <p className="mt-2 text-sm text-slate-600">
           {demo

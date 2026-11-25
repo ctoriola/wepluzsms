@@ -4,12 +4,14 @@ import { Link } from "react-router-dom";
 import { Alert, Button, Field } from "@/components/ui";
 import { friendlyError } from "@/lib/api";
 import { auth } from "@/lib/firebase";
+import { WepluzMark } from "@/layout/AppShell";
 
 function AuthCard({ title, description, children }: { title: string; description: string; children: ReactNode }) {
   return (
-    <div className="flex min-h-full items-center justify-center bg-slate-50 px-4 py-10">
-      <div className="card w-full max-w-sm p-6">
-        <h1 className="text-lg font-bold">{title}</h1>
+    <div className="flex min-h-full items-center justify-center bg-mint px-4 py-10">
+      <div className="w-full max-w-sm rounded-[2rem] bg-white p-7 shadow-xl shadow-brand/10">
+        <WepluzMark size={40} />
+        <h1 className="mt-4 text-xl font-semibold tracking-tight">{title}</h1>
         <p className="mt-1 text-sm text-slate-500">{description}</p>
         <div className="mt-5">{children}</div>
       </div>

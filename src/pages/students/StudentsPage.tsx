@@ -1,7 +1,7 @@
 import { sendPasswordResetEmail } from "firebase/auth";
 import { ArrowUpRight, FileSpreadsheet, Plus, Search } from "lucide-react";
-import { useMemo, useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/auth/AuthProvider";
 import { Alert, Badge, Button, EmptyState, Field, FullPageSpinner, Modal, PageHeader } from "@/components/ui";
 import { loadLevels } from "@/lib/academics";
@@ -126,7 +126,9 @@ export function StudentsPage() {
   const isAdmin = can(ADMIN_ROLES);
   const [armFilter, setArmFilter] = useState("");
   const [status, setStatus] = useState<"active" | "withdrawn" | "graduated" | "all">("active");
-  const [q, setQ] = useState("");
+  const [params] = useSearchParams();
+  const [q, setQ] = useState(params.get("q") ?? "");
+  useEffect(() => setQ(params.get("q") ?? ""), [params]);
   const [adding, setAdding] = useState(false);
 
   const data = useAsync(async () => {

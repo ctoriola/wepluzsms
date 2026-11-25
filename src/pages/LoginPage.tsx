@@ -2,6 +2,7 @@ import { KeyRound, Smartphone } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/auth/AuthProvider";
+import { WepluzMark } from "@/layout/AppShell";
 import { Alert, Button, Field, SchoolLogo } from "@/components/ui";
 import { applyBranding, schoolSlugFromLocation } from "@/lib/branding";
 import { DEMO_ACCOUNTS, DEMO_PASSWORD, isDemoMode } from "@/lib/demo";
@@ -191,7 +192,7 @@ function DemoAccounts() {
   }
 
   return (
-    <section className="card mt-4 p-4" aria-labelledby="demo-title">
+    <section className="card mt-6 p-4" aria-labelledby="demo-title">
       <h2 id="demo-title" className="text-sm font-semibold">Try a demo account</h2>
       <p className="mt-0.5 text-xs text-slate-500">One click signs you in as that person. Password for all: {DEMO_PASSWORD}</p>
       {error && <div className="mt-3"><Alert>{error}</Alert></div>}
@@ -201,7 +202,7 @@ function DemoAccounts() {
             key={a.email}
             onClick={() => void signIn(a.email)}
             disabled={busy !== null}
-            className="rounded-lg border border-slate-200 px-3 py-2 text-left hover:border-brand/40 hover:bg-brand/5 disabled:opacity-50"
+            className="rounded-2xl bg-white px-3 py-2.5 text-left ring-1 ring-transparent transition hover:ring-brand/30 disabled:opacity-50"
           >
             <span className="block text-sm font-medium">{busy === a.email ? "Signing in..." : a.label}</span>
             <span className="block truncate text-xs text-slate-500">{a.who}</span>
@@ -233,46 +234,62 @@ export function LoginPage() {
 
   const name = branding?.name ?? "Wepluz School Manager";
   const tabClass = (active: boolean) =>
-    `flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${active ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"}`;
+    `flex flex-1 items-center justify-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition ${active ? "bg-white text-brand shadow-sm" : "text-slate-600 hover:text-ink"}`;
 
   return (
-    <div className="flex min-h-full flex-col items-center justify-center bg-gradient-to-b from-brand/5 to-slate-50 px-4 py-10">
-      <div className="w-full max-w-sm">
-        <div className="mb-6 flex flex-col items-center text-center">
-          <SchoolLogo url={branding?.logo ?? null} name={name} size={64} />
-          <h1 className="mt-4 text-xl font-bold text-slate-900">{name}</h1>
-          <p className="mt-1 text-sm text-slate-500">{branding?.motto ?? "Sign in to continue"}</p>
-        </div>
+    <div className="flex min-h-full items-center justify-center bg-mint p-0 sm:p-5">
+      <div className="flex min-h-full w-full max-w-5xl overflow-hidden bg-white sm:min-h-[640px] sm:rounded-[2.25rem] sm:shadow-xl sm:shadow-brand/10">
+        <aside className="relative hidden w-[42%] flex-col justify-between overflow-hidden bg-brand p-10 text-white lg:flex">
+          <div className="flex items-center gap-3">
+            <WepluzMark size={40} />
+            <span className="text-xl font-semibold">Wepluz</span>
+          </div>
+          <div className="relative z-10">
+            <h2 className="text-4xl font-semibold leading-tight tracking-tight">Run your whole school from one calm place.</h2>
+            <p className="mt-4 max-w-sm text-white/75">Students, attendance, results and fees, with parents kept in the loop by SMS and WhatsApp.</p>
+          </div>
+          <p className="text-sm text-white/60">Powered by MANDEXA</p>
+          <span className="pointer-events-none absolute -bottom-24 -right-24 h-72 w-72 rounded-full bg-white/5" aria-hidden />
+          <span className="pointer-events-none absolute -bottom-8 -right-8 h-36 w-36 rounded-full bg-white/[0.07]" aria-hidden />
+        </aside>
 
-        {!isFirebaseConfigured && (
-          <div className="mb-4">
-            <Alert>App not configured: add the VITE_FIREBASE_* settings (see .env.example), then redeploy.</Alert>
-          </div>
-        )}
-        {isFirebaseConfigured && !installed && (
-          <div className="mb-4">
-            <Alert tone="info">
-              Wepluz is not installed on this Firebase project yet. <Link to="/setup" className="font-semibold underline">Open setup</Link>
-            </Alert>
-          </div>
-        )}
+        <div className="flex flex-1 flex-col items-center justify-center px-4 py-10 sm:px-10">
+          <div className="w-full max-w-sm">
+            <div className="mb-6 flex flex-col items-center text-center">
+              {branding ? <SchoolLogo url={branding.logo} name={name} size={64} /> : <WepluzMark size={56} />}
+              <h1 className="mt-4 text-2xl font-semibold tracking-tight">{name}</h1>
+              <p className="mt-1 text-sm text-slate-500">{branding?.motto ?? "Sign in to continue"}</p>
+            </div>
 
-        <div className="card p-5 sm:p-6">
-          <div className="mb-5 flex gap-1 rounded-lg bg-slate-100 p-1" role="tablist" aria-label="Sign-in method">
-            <button role="tab" aria-selected={tab === "staff"} className={tabClass(tab === "staff")} onClick={() => setTab("staff")}>
-              <KeyRound className="h-4 w-4" aria-hidden /> Staff
-            </button>
-            <button role="tab" aria-selected={tab === "parent"} className={tabClass(tab === "parent")} onClick={() => setTab("parent")}>
-              <Smartphone className="h-4 w-4" aria-hidden /> Parent
-            </button>
+            {!isFirebaseConfigured && (
+              <div className="mb-4">
+                <Alert>App not configured: add the VITE_FIREBASE_* settings (see .env.example), then redeploy.</Alert>
+              </div>
+            )}
+            {isFirebaseConfigured && !installed && (
+              <div className="mb-4">
+                <Alert tone="info">
+                  Wepluz is not installed on this Firebase project yet. <Link to="/setup" className="font-semibold underline">Open setup</Link>
+                </Alert>
+              </div>
+            )}
+
+            <div className="mb-5 flex gap-1 rounded-full bg-surface p-1" role="tablist" aria-label="Sign-in method">
+              <button role="tab" aria-selected={tab === "staff"} className={tabClass(tab === "staff")} onClick={() => setTab("staff")}>
+                <KeyRound className="h-4 w-4" aria-hidden /> Staff
+              </button>
+              <button role="tab" aria-selected={tab === "parent"} className={tabClass(tab === "parent")} onClick={() => setTab("parent")}>
+                <Smartphone className="h-4 w-4" aria-hidden /> Parent
+              </button>
+            </div>
+            {tab === "staff" ? <StaffLogin /> : <ParentLogin />}
+            {isDemoMode && tab === "parent" && (
+              <p className="mt-3 text-xs text-slate-500">Demo: SMS codes need Termii keys on the server. Use the Parent demo account below instead.</p>
+            )}
+            {isDemoMode && <DemoAccounts />}
+            <p className="mt-6 text-center text-xs text-slate-400 lg:hidden">Powered by MANDEXA</p>
           </div>
-          {tab === "staff" ? <StaffLogin /> : <ParentLogin />}
-          {isDemoMode && tab === "parent" && (
-            <p className="mt-3 text-xs text-slate-500">Demo: SMS codes need Termii keys on the server. Use the Parent demo account below instead.</p>
-          )}
         </div>
-        {isDemoMode && <DemoAccounts />}
-        <p className="mt-6 text-center text-xs text-slate-400">Powered by MANDEXA</p>
       </div>
     </div>
   );
