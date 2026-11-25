@@ -10,6 +10,13 @@ import { formatDate, useAsync } from "@/lib/data";
 import { fullName, loadStudentsInArms } from "@/lib/students";
 import { armOptions, MedicalFlag, StudentAvatar } from "../students/common";
 
+const MARK_HINT: Record<Mark, string> = {
+  present: "in school",
+  absent: "did not come",
+  late: "came late (counts as attending)",
+  excused: "absent with permission (not counted against them)",
+};
+
 const STYLE: Record<Mark, string> = {
   present: "bg-emerald-600 text-white border-emerald-600",
   absent: "bg-red-600 text-white border-red-600",
@@ -65,7 +72,7 @@ export function RegisterPage() {
   const students = data.data!.students;
 
   return (
-    <div className="pb-24">
+    <div>
       <Link to="/attendance" className="mb-4 inline-flex items-center gap-1 text-sm text-slate-600 hover:text-slate-900"><ArrowLeft className="h-4 w-4" aria-hidden /> Attendance</Link>
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
@@ -76,6 +83,14 @@ export function RegisterPage() {
           <CheckCheck className="h-4 w-4" aria-hidden /> All present
         </Button>
       </div>
+      <ul className="mb-4 flex flex-wrap gap-x-4 gap-y-2 text-xs text-slate-600" aria-label="Key">
+        {MARKS.map((m) => (
+          <li key={m} className="flex items-center gap-1.5">
+            <span className={`flex h-6 w-6 items-center justify-center rounded-md border text-[11px] font-bold ${STYLE[m]}`} aria-hidden>{MARK_LABEL[m][0]}</span>
+            <span><span className="font-semibold text-ink">{MARK_LABEL[m]}</span> <span className="text-slate-500">{MARK_HINT[m]}</span></span>
+          </li>
+        ))}
+      </ul>
       {error && <div className="mb-4"><Alert>{error}</Alert></div>}
       {students.length === 0 ? (
         <Alert tone="info">This class has no active students yet.</Alert>
@@ -107,8 +122,8 @@ export function RegisterPage() {
           ))}
         </ul>
       )}
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur lg:left-64">
-        <div className="mx-auto flex max-w-6xl items-center gap-3">
+      <div className="sticky bottom-3 z-30 mt-4 rounded-2xl border border-slate-100 bg-white/95 px-4 py-3 shadow-lg shadow-ink/10 backdrop-blur">
+        <div className="flex items-center gap-3">
           <p className="flex-1 text-sm text-slate-600">
             <span className="font-semibold text-emerald-700">{counts.present}</span> P · <span className="font-semibold text-red-600">{counts.absent}</span> A · <span className="font-semibold text-amber-600">{counts.late}</span> L
             {counts.excused ? <> · <span className="font-semibold">{counts.excused}</span> E</> : null}
