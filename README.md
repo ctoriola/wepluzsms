@@ -45,7 +45,7 @@ scripts/sync-rules.mjs  publishes the rules on each Vercel build
 
 ## Design system
 
-Mint backdrop, white rounded app frame, curved teal sidebar, soft grey cards, Outfit font.
+Mint backdrop, white rounded app frame, soft grey cards, Outfit font. On desktop the menu is an icon rail: a teal tab that curves out of the frame's left edge, white icons, a white rounded square for the current page, and the page name as a tooltip on hover or keyboard focus. The school switcher sits in the top bar. Pages that are not built yet stay out of the rail. On phones the menu opens as a labelled drawer.
 
 | Token | Value | Use |
 |---|---|---|

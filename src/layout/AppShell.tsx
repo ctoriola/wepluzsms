@@ -62,6 +62,105 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
+/** Desktop rail: a teal tab that curves out of the frame's left edge, icons only, names as tooltips. */
+function Rail() {
+  const { can, isPlatformAdmin, activeSchool } = useAuth();
+  // Coming-soon pages stay out of the rail: an icon you cannot open is noise without a label.
+  const sections = navFor(can, isPlatformAdmin, Boolean(activeSchool))
+    .map((sec) => ({ ...sec, items: sec.items.filter((it) => !it.comingIn) }))
+    .filter((sec) => sec.items.length > 0);
+  const [tip, setTip] = useState<{ label: string; top: number; left: number } | null>(null);
+  const show = (label: string) => (e: { currentTarget: HTMLElement }) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    setTip({ label, top: r.top + r.height / 2, left: r.right + 14 });
+  };
+  const hide = () => setTip(null);
+  // Many pages (e.g. platform admins) or a short screen: use the compact size so every icon fits.
+  const compact = sections.reduce((n, sec) => n + sec.items.length, 0) > 10;
+  const item = `flex items-center justify-center rounded-[14px] transition ${compact ? "h-9 w-9" : "h-11 w-11 [@media(max-height:780px)]:h-9 [@media(max-height:780px)]:w-9"}`;
+  return (
+    <aside className="hidden w-[6.5rem] shrink-0 flex-col lg:flex">
+      <Link to="/" className="flex h-28 shrink-0 items-center justify-center [@media(max-height:780px)]:h-20" aria-label="Wepluz home">
+        <WepluzMark size={46} />
+      </Link>
+      <div className="flex min-h-0 flex-1 flex-col justify-center pb-16 [@media(max-height:780px)]:pb-6">
+        <div className="flex min-h-0 w-24 flex-col">
+          <svg viewBox="0 0 96 72" preserveAspectRatio="none" className="block h-[72px] w-full shrink-0 fill-brand [@media(max-height:780px)]:h-14" aria-hidden>
+            <path d="M0 0C0 40 96 30 96 72H0Z" />
+          </svg>
+          <nav
+            aria-label="Main"
+            onScroll={hide}
+            className="-my-px flex min-h-0 flex-col items-center gap-1 overflow-y-auto bg-brand py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            {sections.map((section, i) => (
+              <div key={section.title ?? i} className="flex flex-col items-center gap-1">
+                {i > 0 && <span className="my-1.5 h-px w-5 shrink-0 bg-white/25" aria-hidden />}
+                {section.items.map((it) => {
+                  const Icon = it.icon;
+                  return (
+                    <NavLink
+                      key={it.to}
+                      to={it.to}
+                      end={it.to === "/"}
+                      aria-label={it.label}
+                      onMouseEnter={show(it.label)}
+                      onMouseLeave={hide}
+                      onFocus={show(it.label)}
+                      onBlur={hide}
+                      onClick={hide}
+                      className={({ isActive }) =>
+                        `${item} shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70 ${isActive ? "bg-white text-brand shadow-[0_6px_16px_-6px_rgba(0,0,0,0.35)]" : "text-white/90 hover:bg-white/15 hover:text-white"}`
+                      }
+                    >
+                      <Icon className="h-5 w-5" aria-hidden />
+                    </NavLink>
+                  );
+                })}
+              </div>
+            ))}
+          </nav>
+          <svg viewBox="0 0 96 72" preserveAspectRatio="none" className="block h-[72px] w-full shrink-0 fill-brand [@media(max-height:780px)]:h-14" aria-hidden>
+            <path d="M0 0H96C96 42 0 32 0 72Z" />
+          </svg>
+        </div>
+      </div>
+      {tip && (
+        <div role="tooltip" className="pointer-events-none fixed z-50 -translate-y-1/2 whitespace-nowrap rounded-xl bg-ink px-3 py-1.5 text-xs font-medium text-white shadow-lg" style={{ top: tip.top, left: tip.left }}>
+          {tip.label}
+        </div>
+      )}
+    </aside>
+  );
+}
+
+/** School chip in the top bar (desktop): logo, name, current term; a picker when you belong to several schools. */
+function SchoolChip() {
+  const { schools, activeSchool, switchSchool, currentTerm } = useAuth();
+  if (!activeSchool) return null;
+  return (
+    <div className="hidden min-w-0 max-w-[16rem] items-center gap-2.5 rounded-2xl bg-surface py-1.5 pl-1.5 pr-3 lg:flex">
+      <SchoolLogo url={activeSchool.logo} name={activeSchool.name} size={36} />
+      <div className="min-w-0 flex-1">
+        {schools.length > 1 ? (
+          <label className="relative block">
+            <span className="sr-only">Switch school</span>
+            <select value={activeSchool.id} onChange={(e) => void switchSchool(e.target.value)} className="w-full cursor-pointer appearance-none truncate bg-transparent pr-5 text-sm font-semibold focus:outline-none">
+              {schools.map((sc) => (
+                <option key={sc.id} value={sc.id}>{sc.name}</option>
+              ))}
+            </select>
+            <ChevronsUpDown className="pointer-events-none absolute right-0 top-0.5 h-4 w-4 text-slate-400" aria-hidden />
+          </label>
+        ) : (
+          <p className="truncate text-sm font-semibold">{activeSchool.name}</p>
+        )}
+        <p className="truncate text-[11px] text-slate-500">{currentTerm ? `${currentTerm.name} · ${currentTerm.session_name}` : "No current term set"}</p>
+      </div>
+    </div>
+  );
+}
+
 function SchoolSwitcher() {
   const { schools, activeSchool, switchSchool, currentTerm } = useAuth();
   if (!activeSchool) return null;
@@ -212,6 +311,7 @@ function UserMenu() {
           <button role="menuitem" onClick={() => void signOut()} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-slate-700 hover:bg-surface">
             <LogOut className="h-4 w-4" aria-hidden /> Sign out
           </button>
+          <p className="mt-1 border-t border-slate-100 px-3 pb-1 pt-2 text-[11px] text-slate-400">Wepluz, powered by MANDEXA</p>
         </div>
       )}
     </div>
@@ -228,9 +328,7 @@ export function AppShell() {
   return (
     <div className="h-full lg:p-5">
       <div className="mx-auto flex h-full max-w-[1480px] overflow-hidden bg-white lg:rounded-[2.25rem] lg:shadow-[0_20px_60px_-20px_rgba(46,125,105,0.25)]">
-        <aside className="hidden w-[17rem] shrink-0 p-3 lg:block">
-          <SidebarPanel />
-        </aside>
+        <Rail />
 
         {open && (
           <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Menu">
@@ -245,7 +343,7 @@ export function AppShell() {
         )}
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex items-center gap-3 px-4 pb-2 pt-4 lg:px-6 lg:pt-6">
+          <header className="flex items-center gap-3 px-4 pb-2 pt-4 lg:pl-2 lg:pr-6 lg:pt-6">
             <button onClick={() => setOpen(true)} className="rounded-2xl bg-surface p-2.5 text-slate-600 lg:hidden" aria-label="Open menu">
               <Menu className="h-5 w-5" />
             </button>
@@ -253,6 +351,7 @@ export function AppShell() {
               <CommandSearch />
             </div>
             <p className="min-w-0 flex-1 truncate font-semibold md:hidden">{activeSchool?.name ?? "Wepluz"}</p>
+            <SchoolChip />
             {activeSchool && can(ADMIN_ROLES) && (
               <Link to="/settings/school" className="hidden rounded-2xl bg-surface p-3 text-slate-600 hover:text-brand sm:block" aria-label="School settings" title="School settings">
                 <Settings className="h-[18px] w-[18px]" />
@@ -261,12 +360,12 @@ export function AppShell() {
             <UserMenu />
           </header>
           {isDemoMode && (
-            <div className="mx-4 mt-2 rounded-2xl bg-accent/25 px-4 py-2 text-center text-xs font-medium text-[#6B4F00] lg:mx-6" role="note">
+            <div className="mx-4 mt-2 rounded-2xl bg-accent/25 px-4 py-2 text-center text-xs font-medium text-[#6B4F00] lg:ml-2 lg:mr-6" role="note">
               Demo mode: sample data only. Do not enter real student or parent information.
             </div>
           )}
           <main className="relative flex-1 overflow-y-auto">
-            <div className="mx-auto max-w-6xl px-4 py-6 lg:px-6">
+            <div className="px-4 py-6 lg:pl-2 lg:pr-6">
               <Outlet />
             </div>
           </main>
