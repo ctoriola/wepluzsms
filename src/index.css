@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --brand: 46 125 105; /* #2E7D69 deep teal (white text passes AA) */
+  --accent: 245 196 72; /* #F5C448 sunflower */
+  --school: 46 125 105; /* replaced by the active school's colour */
+  --mint: 221 243 237; /* #DDF3ED */
+  --surface: 244 246 248; /* #F4F6F8 */
+  --ink: 23 29 38; /* #171D26 */
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-mint text-ink antialiased;
+  font-feature-settings: "ss01";
+}
+
+@layer components {
+  .input {
+    @apply block w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-ink placeholder:text-slate-400 focus:border-brand focus:outline-none focus:ring-4 focus:ring-brand/15 disabled:bg-surface disabled:text-slate-500;
+  }
+  .label {
+    @apply mb-1.5 block text-sm font-medium text-slate-600;
+  }
+  /* Borderless soft panel, as in the Wepluz design system. */
+  .card {
+    @apply rounded-3xl bg-surface;
+  }
+}

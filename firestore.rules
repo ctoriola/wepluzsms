@@ -1,0 +1,164 @@
+rules_version = '2';
+
+// =============================================================================
+// Wepluz Firestore security rules
+//
+// Model: the browser only READS. Every change goes through the server API
+// (api/rpc.ts), which checks permissions and school rules before writing with
+// the Admin SDK. So every client write below is denied.
+//
+// Each school's data lives under /schools/{schoolId}. A person can read a
+// school's data only if they have an active membership there (or are a
+// MANDEXA platform admin), and the school itself is active.
+//
+// These rules are deployed automatically by the /setup page and on every
+// Vercel build (scripts/sync-rules.mjs).
+// =============================================================================
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function platformAdmin() {
+      return signedIn() && request.auth.token.platformAdmin == true;
+    }
+    function memberPath(sid) {
+      return /databases/$(database)/documents/schools/$(sid)/members/$(request.auth.uid);
+    }
+    function isMember(sid) {
+      return platformAdmin() || (
+        signedIn()
+        && exists(memberPath(sid))
+        && get(memberPath(sid)).data.status == 'active'
+        && get(/databases/$(database)/documents/schools/$(sid)).data.status == 'active'
+      );
+    }
+    function hasRole(sid, roles) {
+      return platformAdmin() || (isMember(sid) && get(memberPath(sid)).data.roles.hasAny(roles));
+    }
+    function isStaff(sid) {
+      return hasRole(sid, ['proprietor', 'principal', 'school_admin', 'bursar', 'teacher']);
+    }
+    function isAdmin(sid) {
+      return hasRole(sid, ['proprietor', 'principal', 'school_admin']);
+    }
+
+    // Your own profile and list of schools.
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    match /schools/{sid} {
+      allow read: if isMember(sid);
+      allow write: if false;
+
+      // Memberships: you can see your own; admins see everyone in the school.
+      match /members/{uid} {
+        allow read: if (signedIn() && request.auth.uid == uid) || isAdmin(sid);
+        allow write: if false;
+      }
+
+      // Logo and other branding assets.
+      match /assets/{assetId} {
+        allow read: if isMember(sid);
+        allow write: if false;
+      }
+
+      // Audit trail: proprietor and principal only.
+      match /auditLog/{entryId} {
+        allow read: if hasRole(sid, ['proprietor', 'principal']);
+        allow write: if false;
+      }
+
+      // Academic calendar and structure: everyone in the school can read.
+      match /sessions/{id} {
+        allow read: if isMember(sid);
+        allow write: if false;
+      }
+      match /terms/{id} {
+        allow read: if isMember(sid);
+        allow write: if false;
+      }
+      match /classLevels/{id} {
+        allow read: if isMember(sid);
+        allow write: if false;
+      }
+      match /classArms/{id} {
+        allow read: if isMember(sid);
+        allow write: if false;
+      }
+      match /subjects/{id} {
+        allow read: if isMember(sid);
+        allow write: if false;
+      }
+
+      // Teacher assignments: staff only.
+      match /assignments/{id} {
+        allow read: if isStaff(sid);
+        allow write: if false;
+      }
+
+      // ---------------------------------------------------------------- students
+      // Leadership and the bursar see every student. Teachers see students in
+      // the arms they teach (arm.teacherIds, kept up to date by the server).
+      // Parents see only their own children.
+      function seesAllStudents() {
+        return hasRole(sid, ['proprietor', 'principal', 'school_admin', 'bursar']);
+      }
+      function teachesArm(armId) {
+        return armId != null
+          && isStaff(sid)
+          && get(/databases/$(database)/documents/schools/$(sid)/classArms/$(armId)).data.get('teacherIds', []).hasAny([request.auth.uid]);
+      }
+      function isParentOf(student) {
+        return isMember(sid) && student.get('parentUids', []).hasAny([request.auth.uid]);
+      }
+      function studentDoc(studentId) {
+        return get(/databases/$(database)/documents/schools/$(sid)/students/$(studentId)).data;
+      }
+
+      match /students/{studentId} {
+        allow read: if seesAllStudents() || teachesArm(resource.data.currentArmId) || isParentOf(resource.data);
+        allow write: if false;
+      }
+      match /studentPhotos/{studentId} {
+        allow read: if seesAllStudents() || teachesArm(studentDoc(studentId).currentArmId) || isParentOf(studentDoc(studentId));
+        allow write: if false;
+      }
+      // Medical details: leadership and the child's own parents only.
+      match /studentMedical/{studentId} {
+        allow read: if isAdmin(sid) || isParentOf(studentDoc(studentId));
+        allow write: if false;
+      }
+      match /guardians/{guardianId} {
+        allow read: if seesAllStudents() || (isMember(sid) && resource.data.uid == request.auth.uid);
+        allow write: if false;
+      }
+      match /enrolments/{enrolmentId} {
+        allow read: if seesAllStudents() || teachesArm(resource.data.armId);
+        allow write: if false;
+      }
+      // Daily registers (one per class per day). Parents use the server summary instead,
+      // so they never see other children's marks.
+      // The id is "<armId>__<date>", so a teacher can also check a register
+      // that has not been taken yet (the document does not exist).
+      match /attendance/{registerId} {
+        allow read: if seesAllStudents() || teachesArm(registerId.split('__')[0]);
+        allow write: if false;
+      }
+    }
+
+    // Platform admins can read the installation record (data version).
+    match /platform/config {
+      allow read: if platformAdmin();
+      allow write: if false;
+    }
+
+    // Everything else (login codes, slugs, platform config) is server-only.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

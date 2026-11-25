@@ -1,0 +1,117 @@
+// One-click installation: deploys the security rules and creates either the
+// first platform admin (real install) or the full demo school (demo install).
+// Replaces "paste the migration files". Protected by the SETUP_TOKEN secret.
+import { createHash, timingSafeEqual } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { getSecurityRules } from "firebase-admin/security-rules";
+import { z } from "zod";
+import { adminApp, adminAuth, db, fail, now, parse, requirePlatformAdmin, usingEmulators, type Ctx } from "../core.js";
+import { DEMO, seedDemo } from "../seed.js";
+import { seedDemoAttendance } from "../seedAttendance.js";
+import { seedDemoStudents } from "../seedStudents.js";
+import { recomputeArmTeachers } from "../sync.js";
+
+/**
+ * Bump when existing installations need a data update after a new release.
+ * 1: WS0 + WS1.  2: WS2 (class arm teacher lists; demo students).  3: WS3 (demo attendance).
+ */
+export const DATA_VERSION = 3;
+
+const configRef = () => db().collection("platform").doc("config");
+
+export async function setupStatus() {
+  const cfg = await configRef().get();
+  return {
+    installed: cfg.exists,
+    mode: (cfg.data()?.mode as string | undefined) ?? null,
+    configured: Boolean(process.env.SETUP_TOKEN),
+    dataVersion: cfg.exists ? ((cfg.data()?.dataVersion as number | undefined) ?? 1) : null,
+    latestDataVersion: DATA_VERSION,
+  };
+}
+
+function checkToken(given: string) {
+  const expected = process.env.SETUP_TOKEN;
+  if (!expected) fail(503, "Add a SETUP_TOKEN environment variable in Vercel, redeploy, then try again.");
+  const a = createHash("sha256").update(given).digest();
+  const b = createHash("sha256").update(expected!).digest();
+  if (!timingSafeEqual(a, b)) fail(403, "That setup token is not correct.");
+}
+
+/** Publish firestore.rules to the Firebase project. Skipped on the local emulator (it loads the file itself). */
+export async function deployRules(): Promise<"deployed" | "emulator"> {
+  if (usingEmulators()) return "emulator";
+  const source = await readFile(path.join(process.cwd(), "firestore.rules"), "utf8");
+  try {
+    await getSecurityRules(adminApp()).releaseFirestoreRulesetFromSource(source);
+  } catch (err) {
+    console.error("Rules deploy failed:", err);
+    fail(500, "Could not publish the security rules. Check that the service account key belongs to this Firebase project and that Firestore is created.");
+  }
+  return "deployed";
+}
+
+export async function setupInstall(input: unknown) {
+  const v = parse(
+    z.discriminatedUnion("mode", [
+      z.object({ mode: z.literal("demo"), setupToken: z.string().min(1) }),
+      z.object({
+        mode: z.literal("production"),
+        setupToken: z.string().min(1),
+        fullName: z.string().trim().min(2, "Enter your full name.").max(200),
+        email: z.string().trim().toLowerCase().email("Enter a valid email address."),
+        password: z.string().min(10, "Use a password of at least 10 characters."),
+      }),
+    ]),
+    input,
+  );
+  checkToken(v.setupToken);
+  if ((await configRef().get()).exists) fail(409, "Wepluz is already installed on this Firebase project.");
+
+  const rules = await deployRules();
+
+  if (v.mode === "demo") {
+    await seedDemo();
+  } else {
+    const user = await adminAuth().createUser({ email: v.email, password: v.password, displayName: v.fullName, emailVerified: true });
+    await adminAuth().setCustomUserClaims(user.uid, { platformAdmin: true });
+    await db().collection("users").doc(user.uid).set({ fullName: v.fullName, email: v.email, phone: null, memberships: {}, createdAt: now() });
+  }
+  await configRef().set({ installedAt: now(), mode: v.mode, dataVersion: DATA_VERSION });
+  return { ok: true, rules };
+}
+
+/** Bring an existing installation's data up to date after a release. Safe to run more than once. */
+export async function setupUpgrade(_input: unknown, ctx: Ctx | null) {
+  requirePlatformAdmin(ctx);
+  const cfg = await configRef().get();
+  if (!cfg.exists) fail(400, "Wepluz is not installed yet. Use /setup first.");
+  const from = (cfg.data()?.dataVersion as number | undefined) ?? 1;
+  const done: string[] = [];
+  if (from < 2) {
+    const schools = await db().collection("schools").get();
+    let arms = 0;
+    for (const s of schools.docs) arms += await recomputeArmTeachers(s.id);
+    done.push(`Updated teacher lists on ${arms} class arms.`);
+    if (cfg.data()?.mode === "demo") {
+      const existing = await db().collection("schools").doc(DEMO.academy).collection("students").limit(1).get();
+      if (existing.empty && (await db().collection("schools").doc(DEMO.academy).get()).exists) {
+        const r = await seedDemoStudents();
+        done.push(`Added ${r.students} demo students.`);
+      }
+    }
+  }
+  if (from < 3 && cfg.data()?.mode === "demo" && (await db().collection("schools").doc(DEMO.academy).get()).exists) {
+    const r = await seedDemoAttendance();
+    if (r.registers) done.push(`Added ${r.registers} demo class registers.`);
+  }
+  await configRef().set({ dataVersion: DATA_VERSION, upgradedAt: now() }, { merge: true });
+  return { from, to: DATA_VERSION, done };
+}
+
+/** Platform admins can re-publish the rules any time (also done on every Vercel build). */
+export async function setupSyncRules(_input: unknown, ctx: Ctx | null) {
+  requirePlatformAdmin(ctx);
+  return { rules: await deployRules() };
+}
